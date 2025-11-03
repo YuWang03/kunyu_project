@@ -112,17 +112,23 @@ builder.Services.AddSwaggerGen(c =>
         var order = apiDesc.GroupName switch
         {
             "Auth" => "1",
+            "帳號整合" => "1",
             "BasicInformation" => "2",
+            "基本資料" => "2",
             "AttendanceQuery" => "3",
             "考勤查詢" => "3",
             "LeaveRemain" => "4",
             "請假剩餘天數" => "4",
             "LeaveForm" => "5",
-            "電子表單" => "5",
+            "請假單" => "5",
             "OutingForm" => "6",
+            "外出單" => "6",
             "OvertimeForm" => "7",
+            "加班單" => "7",
             "AttendanceForm" => "8",
+            "出勤確認單" => "8",
             "BusinessTripForm" => "9",
+            "出差單" => "9",
             _ => "99"
         };
         return $"{order}_{apiDesc.RelativePath}";
