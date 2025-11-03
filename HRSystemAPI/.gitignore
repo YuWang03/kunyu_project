@@ -1,0 +1,39 @@
+﻿# ===============================
+# Visual Studio / Rider / VS Code
+# ===============================
+.vs/
+.idea/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# ===============================
+# Build out
+
+
+
+
+
+
+
+puts
+# ===============================
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+*.log
+*.tmp
+*.cache/
+*.dbmdl
+*.bak
+*.dll
+*.exe
+
+# ===============================
+# Others
+# ===============================
+*.swp
+*.DS_Store
+Thumbs.db

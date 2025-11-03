@@ -1,0 +1,30 @@
+@baseUrl = http://localhost:5147
+
+### 測試 1: 檢查帳號狀態
+GET {{baseUrl}}/api/Auth/check-status?uid=E001
+
+### 測試 2: 登入
+POST {{baseUrl}}/api/Auth/login
+Content-Type: application/json
+
+{
+  "email": "test@company.com",
+  "password": "password123"
+}
+
+### 測試 3: 驗證 Token (請先執行登入，取得 tokenId 後替換下面的值)
+POST {{baseUrl}}/api/Auth/validate-token
+Content-Type: application/json
+
+{
+  "tokenId": "1234567890"
+}
+
+### 測試 4: 取得使用者資訊
+GET {{baseUrl}}/api/Auth/userinfo?email=test@company.com
+
+### 測試 5: FTP 測試
+GET {{baseUrl}}/api/OutingForm/test-ftp
+
+### 測試 6: 查詢待簽核外出單
+GET {{baseUrl}}/api/OutingForm/pending?ApproverEmail=manager@company.com
