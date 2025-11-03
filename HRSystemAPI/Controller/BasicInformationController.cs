@@ -5,11 +5,11 @@ using Microsoft.AspNetCore.Mvc;
 namespace HRSystemAPI.Controllers
 {
     /// <summary>
-    /// 基本資料 API
+    /// 2. 基本資料 API
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
-    [Tags("基本資料")]
+    [Tags("2. 基本資料")]
     public class BasicInformationController : ControllerBase
     {
         private readonly IBasicInfoService _basicInfoService;

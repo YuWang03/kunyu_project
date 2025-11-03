@@ -5,11 +5,11 @@ using Microsoft.AspNetCore.Mvc;
 namespace HRSystemAPI.Controllers
 {
     /// <summary>
-    /// 帳號整合 API
+    /// 1. 帳號整合 API
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
-    [Tags("帳號整合")]
+    [Tags("1. 帳號整合")]
     public class AuthController : ControllerBase
     {
         private readonly IAuthService _authService;

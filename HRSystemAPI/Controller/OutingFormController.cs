@@ -4,8 +4,12 @@ using HRSystemAPI.Services;
 
 namespace HRSystemAPI.Controllers
 {
+    /// <summary>
+    /// 6. 外出單 API
+    /// </summary>
     [ApiController]
     [Route("api/[controller]")]
+    [Tags("6. 外出單")]
     public class OutingFormController : ControllerBase
     {
         private readonly FtpService _ftpService;

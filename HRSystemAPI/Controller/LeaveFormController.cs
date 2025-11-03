@@ -3,8 +3,12 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace HRSystemAPI.Controller
 {
+    /// <summary>
+    /// 5. 請假單 API
+    /// </summary>
     [ApiController]
     [Route("api/[controller]")]
+    [Tags("5. 請假單")]
     public class LeaveFormController : ControllerBase
     {
         private readonly FtpService _ftpService;

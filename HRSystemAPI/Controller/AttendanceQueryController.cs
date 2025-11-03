@@ -5,11 +5,11 @@ using Microsoft.AspNetCore.Mvc;
 namespace HRSystemAPI.Controllers
 {
     /// <summary>
-    /// 考勤查詢 API
+    /// 3. 考勤查詢 API
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
-    [Tags("考勤查詢")]
+    [Tags("3. 考勤查詢")]
     public class AttendanceQueryController : ControllerBase
     {
         private readonly IAttendanceService _attendanceService;

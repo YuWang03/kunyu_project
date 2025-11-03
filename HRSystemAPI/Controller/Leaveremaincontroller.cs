@@ -6,11 +6,11 @@ using System.ComponentModel.DataAnnotations;
 namespace HRSystemAPI.Controllers
 {
     /// <summary>
-    /// 請假剩餘天數-查詢各類假別剩餘天數
+    /// 4. 請假剩餘天數 - 查詢各類假別剩餘天數
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
-    [Tags("請假剩餘天數")]
+    [Tags("4. 請假剩餘天數")]
     public class LeaveRemainController : ControllerBase
     {
         private readonly ILeaveRemainService _leaveRemainService;

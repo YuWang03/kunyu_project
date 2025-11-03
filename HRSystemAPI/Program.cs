@@ -12,6 +12,7 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IBasicInfoService, BasicInfoService>();
 builder.Services.AddScoped<IAttendanceService, AttendanceService>();
 builder.Services.AddScoped<ILeaveRemainService, LeaveRemainService>();
+builder.Services.AddScoped<IOvertimeService, OvertimeService>();
 
 // ===== 註冊 FTP 和 BPM 設定 =====
 builder.Services.Configure<FtpSettings>(builder.Configuration.GetSection("FtpSettings"));
