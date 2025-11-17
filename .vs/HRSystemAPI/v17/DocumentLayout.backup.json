@@ -3,44 +3,8 @@
   "WorkspaceRootPath": "C:\\Users\\user\\Desktop\\HRSystemAPI\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|c:\\users\\user\\desktop\\hrsystemapi\\hrsystemapi\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|solutionrelative:hrsystemapi\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|c:\\users\\user\\desktop\\hrsystemapi\\hrsystemapi\\controller\\outingformcontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|solutionrelative:hrsystemapi\\controller\\outingformcontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|c:\\users\\user\\desktop\\hrsystemapi\\hrsystemapi\\services\\bpmservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|solutionrelative:hrsystemapi\\services\\bpmservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|c:\\users\\user\\desktop\\hrsystemapi\\hrsystemapi\\services\\ftpservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|solutionrelative:hrsystemapi\\services\\ftpservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|c:\\users\\user\\desktop\\hrsystemapi\\hrsystemapi\\models\\settings.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|solutionrelative:hrsystemapi\\models\\settings.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|c:\\users\\user\\desktop\\hrsystemapi\\hrsystemapi\\models\\outingformmodels.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|solutionrelative:hrsystemapi\\models\\outingformmodels.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|c:\\users\\user\\desktop\\hrsystemapi\\hrsystemapi\\services\\outingformservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|solutionrelative:hrsystemapi\\services\\outingformservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|c:\\users\\user\\desktop\\hrsystemapi\\hrsystemapi\\appsettings.json||{90A6B3A7-C1A3-4009-A288-E2FF89E96FA0}",
-      "RelativeMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|solutionrelative:hrsystemapi\\appsettings.json||{90A6B3A7-C1A3-4009-A288-E2FF89E96FA0}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|c:\\users\\user\\desktop\\hrsystemapi\\hrsystemapi\\controller\\leaveformcontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|solutionrelative:hrsystemapi\\controller\\leaveformcontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|c:\\users\\user\\desktop\\hrsystemapi\\hrsystemapi\\controller\\leaveremaincontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI\\HRSystemAPI.csproj|solutionrelative:hrsystemapi\\controller\\leaveremaincontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+      "AbsoluteMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI.csproj|c:\\users\\user\\desktop\\hrsystemapi\\readme.md||{EFC0BB08-EA7D-40C6-A696-C870411A895B}",
+      "RelativeMoniker": "D:0:0:{486FAE80-33F0-443D-91FD-8A3AFB0744F6}|HRSystemAPI.csproj|solutionrelative:readme.md||{EFC0BB08-EA7D-40C6-A696-C870411A895B}"
     }
   ],
   "DocumentGroupContainers": [
@@ -50,128 +14,20 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 4,
+          "SelectedChildIndex": 0,
           "Children": [
             {
               "$type": "Document",
-              "DocumentIndex": 2,
-              "Title": "BpmService.cs",
-              "DocumentMoniker": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\Services\\BpmService.cs",
-              "RelativeDocumentMoniker": "HRSystemAPI\\Services\\BpmService.cs",
-              "ToolTip": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\Services\\BpmService.cs",
-              "RelativeToolTip": "HRSystemAPI\\Services\\BpmService.cs",
-              "ViewState": "AgIAAK0AAAAAAAAAAAAAALQAAAABAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-11-03T08:47:33.319Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 3,
-              "Title": "FtpService.cs",
-              "DocumentMoniker": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\Services\\FtpService.cs",
-              "RelativeDocumentMoniker": "HRSystemAPI\\Services\\FtpService.cs",
-              "ToolTip": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\Services\\FtpService.cs",
-              "RelativeToolTip": "HRSystemAPI\\Services\\FtpService.cs",
-              "ViewState": "AgIAAMwAAAAAAAAAAAAAANMAAAABAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-11-03T08:47:11.978Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 4,
-              "Title": "Settings.cs",
-              "DocumentMoniker": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\Models\\Settings.cs",
-              "RelativeDocumentMoniker": "HRSystemAPI\\Models\\Settings.cs",
-              "ToolTip": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\Models\\Settings.cs",
-              "RelativeToolTip": "HRSystemAPI\\Models\\Settings.cs",
-              "ViewState": "AgIAAA8AAAAAAAAAAAAAABYAAAABAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-11-03T08:46:21.101Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 6,
-              "Title": "Outingformservice.cs",
-              "DocumentMoniker": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\Services\\Outingformservice.cs",
-              "RelativeDocumentMoniker": "HRSystemAPI\\Services\\Outingformservice.cs",
-              "ToolTip": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\Services\\Outingformservice.cs",
-              "RelativeToolTip": "HRSystemAPI\\Services\\Outingformservice.cs",
-              "ViewState": "AgIAAAwBAAAAAAAAAAAcwCMBAAABAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-11-03T07:36:32.434Z"
-            },
-            {
-              "$type": "Document",
               "DocumentIndex": 0,
-              "Title": "Program.cs",
-              "DocumentMoniker": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\Program.cs",
-              "RelativeDocumentMoniker": "HRSystemAPI\\Program.cs",
-              "ToolTip": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\Program.cs",
-              "RelativeToolTip": "HRSystemAPI\\Program.cs",
-              "ViewState": "AgIAAJwAAAAAAAAAAAAAAJ8AAAAYAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-11-03T05:42:01.74Z",
+              "Title": "README.md",
+              "DocumentMoniker": "C:\\Users\\user\\Desktop\\HRSystemAPI\\README.md",
+              "RelativeDocumentMoniker": "README.md",
+              "ToolTip": "C:\\Users\\user\\Desktop\\HRSystemAPI\\README.md",
+              "RelativeToolTip": "README.md",
+              "ViewState": "AgIAAA8AAAAAAAAAAAAAABIAAAAHAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001818|",
+              "WhenOpened": "2025-11-03T04:53:57.11Z",
               "EditorCaption": ""
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 1,
-              "Title": "OutingFormController.cs",
-              "DocumentMoniker": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\Controller\\OutingFormController.cs",
-              "RelativeDocumentMoniker": "HRSystemAPI\\Controller\\OutingFormController.cs",
-              "ToolTip": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\Controller\\OutingFormController.cs",
-              "RelativeToolTip": "HRSystemAPI\\Controller\\OutingFormController.cs",
-              "ViewState": "AgIAAFQBAAAAAAAAAAAAAFsBAAABAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-11-03T08:48:07.89Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 5,
-              "Title": "Outingformmodels.cs",
-              "DocumentMoniker": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\Models\\Outingformmodels.cs",
-              "RelativeDocumentMoniker": "HRSystemAPI\\Models\\Outingformmodels.cs",
-              "ToolTip": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\Models\\Outingformmodels.cs",
-              "RelativeToolTip": "HRSystemAPI\\Models\\Outingformmodels.cs",
-              "ViewState": "AgIAAHcAAAAAAAAAAAA+wHwAAAABAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-11-03T07:35:31.591Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 7,
-              "Title": "appsettings.json",
-              "DocumentMoniker": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\appsettings.json",
-              "RelativeDocumentMoniker": "HRSystemAPI\\appsettings.json",
-              "ToolTip": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\appsettings.json",
-              "RelativeToolTip": "HRSystemAPI\\appsettings.json",
-              "ViewState": "AgIAAA8AAAAAAAAAAAAUwBYAAAABAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001642|",
-              "WhenOpened": "2025-11-03T05:19:19.822Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 9,
-              "Title": "Leaveremaincontroller.cs",
-              "DocumentMoniker": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\Controller\\Leaveremaincontroller.cs",
-              "RelativeDocumentMoniker": "HRSystemAPI\\Controller\\Leaveremaincontroller.cs",
-              "ToolTip": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\Controller\\Leaveremaincontroller.cs",
-              "RelativeToolTip": "HRSystemAPI\\Controller\\Leaveremaincontroller.cs",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAALQAAABCAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-11-03T05:45:46.212Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 8,
-              "Title": "LeaveFormController.cs",
-              "DocumentMoniker": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\Controller\\LeaveFormController.cs",
-              "RelativeDocumentMoniker": "HRSystemAPI\\Controller\\LeaveFormController.cs",
-              "ToolTip": "C:\\Users\\user\\Desktop\\HRSystemAPI\\HRSystemAPI\\Controller\\LeaveFormController.cs",
-              "RelativeToolTip": "HRSystemAPI\\Controller\\LeaveFormController.cs",
-              "ViewState": "AgIAAGAAAAAAAAAAAAAcwG0AAAABAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-11-03T05:26:23.468Z"
             }
           ]
         }
