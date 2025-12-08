@@ -50,5 +50,17 @@ namespace HRSystemAPI.Services
         /// 取得員工近 N 個月的請假記錄
         /// </summary>
         Task<List<LeaveFormRecord>> GetRecentLeaveFormsAsync(string employeeEmail, int months = 2);
+
+        /// <summary>
+        /// 查詢請假假別單位 - efleaveformunit API
+        /// 根據公司代碼查詢所有可用的假別及其最小單位
+        /// </summary>
+        Task<List<LeaveTypeUnitData>> GetLeaveTypeUnitsAsync(string companyCode);
+
+        /// <summary>
+        /// 提交請假單申請 - efleaveform API
+        /// 使用簡化的欄位結構提交請假申請
+        /// </summary>
+        Task<LeaveFormOperationResult> SubmitLeaveFormAsync(LeaveFormSubmitRequest request);
     }
 }

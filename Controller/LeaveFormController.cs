@@ -1,16 +1,18 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using HRSystemAPI.Models;
 using HRSystemAPI.Services;
+using HRSystemAPI.Filters;
 using System.ComponentModel.DataAnnotations;
 
 namespace HRSystemAPI.Controllers
 {
     /// <summary>
-    /// 請假單 API（整合 BPM 系統）
+    /// 請假單 API(整合 BPM 系統)
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
     [Produces("application/json")]
+    [ServiceFilter(typeof(TokenValidationFilter))]
     public class LeaveFormController : ControllerBase
     {
         private readonly ILeaveFormService _leaveFormService;
@@ -336,6 +338,7 @@ namespace HRSystemAPI.Controllers
 
         #region 申請與操作 API
 
+#if false // 暫時隱藏 - BPM 中間件不支援申請 API
         /// <summary>
         /// 申請請假單（支援附件上傳）
         /// </summary>
@@ -455,6 +458,7 @@ namespace HRSystemAPI.Controllers
                 });
             }
         }
+#endif // 申請 API 暫時隱藏
 
 #if false // 暫時隱藏 - BPM 中間件不支援簽核和取消 API
         /// <summary>

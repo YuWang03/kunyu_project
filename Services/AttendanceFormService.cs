@@ -99,6 +99,7 @@ namespace HRSystemAPI.Services
                 var formData = BuildFormData(request, employeeInfo, computedData, filePath);
                 var bpmRequest = new BpmCreateFormRequest
                 {
+                    ProcessCode = FORM_CODE,
                     FormCode = FORM_CODE,
                     FormVersion = FORM_VERSION,
                     UserId = employeeInfo.EmployeeNo,

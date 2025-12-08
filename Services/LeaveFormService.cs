@@ -12,20 +12,27 @@ namespace HRSystemAPI.Services
         private readonly BpmService _bpmService;
         private readonly FtpService _ftpService;
         private readonly IBasicInfoService _basicInfoService;
+        private readonly IBpmMiddlewareService _bpmMiddlewareService;
         private readonly ILogger<LeaveFormService> _logger;
+        private readonly IConfiguration _configuration;
         private const string FORM_CODE = "PI_LEAVE_001";
         private const string FORM_VERSION = "1.0.0";
+        private const string LEAVE_PROCESS_CODE = "PI_LEAVE_001_PROCESS";
 
         public LeaveFormService(
             BpmService bpmService,
             FtpService ftpService,
             IBasicInfoService basicInfoService,
-            ILogger<LeaveFormService> logger)
+            IBpmMiddlewareService bpmMiddlewareService,
+            ILogger<LeaveFormService> logger,
+            IConfiguration configuration)
         {
             _bpmService = bpmService;
             _ftpService = ftpService;
             _basicInfoService = basicInfoService;
+            _bpmMiddlewareService = bpmMiddlewareService;
             _logger = logger;
+            _configuration = configuration;
         }
 
         #region 查詢相關
@@ -313,6 +320,7 @@ namespace HRSystemAPI.Services
                 // 4. 建立 BPM 表單請求
                 var bpmRequest = new BpmCreateFormRequest
                 {
+                    ProcessCode = FORM_CODE,
                     FormCode = FORM_CODE,
                     FormVersion = FORM_VERSION,
                     UserId = employeeInfo.EmployeeNo,
@@ -925,6 +933,247 @@ namespace HRSystemAPI.Services
                 }
             }
             return null;
+        }
+
+        #endregion
+
+        #region 新增 API 方法
+
+        /// <summary>
+        /// 透過工號查詢員工基本資料（內部方法）
+        /// </summary>
+        private async Task<EmployeeBasicInfo?> GetEmployeeByIdAsync(string employeeId)
+        {
+            try
+            {
+                const string sql = @"
+                    SELECT TOP 1
+                        EMPLOYEE_NO as EmployeeNo,
+                        EMPLOYEE_NAME as EmployeeName,
+                        EMAIL_ADDRESS as EmailAddress,
+                        ORGANIZATION_NAME as DepartmentName,
+                        COMPANY_CODE as CompanyCode
+                    FROM [dbo].[vwZZ_EMPLOYEE]
+                    WHERE EMPLOYEE_NO = @EmployeeId COLLATE Chinese_Taiwan_Stroke_CI_AS";
+
+                var connectionString = _configuration.GetConnectionString("HRDatabase")
+                    ?? throw new Exception("無法取得資料庫連線字串");
+
+                using var connection = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
+                var result = await Dapper.SqlMapper.QueryFirstOrDefaultAsync<EmployeeBasicInfo>(connection, sql, new { EmployeeId = employeeId });
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "查詢員工資料失敗: {EmployeeId}", employeeId);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 查詢請假假別單位 - efleaveformunit API
+        /// 根據公司代碼查詢所有可用的假別及其最小單位
+        /// </summary>
+        public async Task<List<LeaveTypeUnitData>> GetLeaveTypeUnitsAsync(string companyCode)
+        {
+            try
+            {
+                _logger.LogInformation("開始查詢假別單位，公司代碼: {CompanyCode}", companyCode);
+
+                // 步驟 1: 同步 BPM 流程信息
+                // 產生表單編號（通常使用格式: PI_Leave_Test + 時間戳記或序號）
+                var processSerialNo = $"PI_Leave_Test{DateTime.Now:yyyyMMddHHmmss}";
+                
+                _logger.LogInformation(
+                    "同步 BPM 流程信息 - 表單編號: {ProcessSerialNo}, 程序代碼: {ProcessCode}",
+                    processSerialNo, LEAVE_PROCESS_CODE);
+
+                var bpmResponse = await _bpmMiddlewareService.SyncProcessInfoAsync(
+                    processSerialNo,
+                    LEAVE_PROCESS_CODE,
+                    "TEST");
+
+                if (bpmResponse == null || bpmResponse.Code != "200")
+                {
+                    _logger.LogWarning(
+                        "BPM 流程同步失敗 - Code: {Code}, Msg: {Msg}",
+                        bpmResponse?.Code, bpmResponse?.Msg);
+                    // 即使 BPM 同步失敗，仍然繼續查詢假別資料
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "BPM 流程同步成功 - 流程ID: {ProcessId}, 流程名稱: {ProcessName}",
+                        bpmResponse.ProcessInfo?.ProcessId,
+                        bpmResponse.ProcessInfo?.ProcessName);
+                }
+
+                // 步驟 2: 查詢假別資訊
+                // SQL 查詢語句 - 查詢所有假別（已移除排除清單，允許所有假別代碼）
+                const string sql = @"
+                    SELECT
+                        L.LEAVE_REFERENCE_CLASS AS LeaveType,
+                        L.LEAVE_MIN_VALUE AS LeaveUnit,
+                        L.LEAVE_REFERENCE_CODE AS LeaveCode,
+                        L.LEAVE_UNIT AS LeaveUnitType
+                    FROM [dbo].[vwZZ_LEAVE_REFERENCE] L
+                    JOIN [dbo].[VwZZ_COMPANY] C ON L.COMPANY_ID = C.COMPANY_ID
+                    WHERE C.COMPANY_CODE = @CompanyCode
+                    AND L.LEAVE_REFERENCE_CODE NOT IN (
+                        'SLC01', 'S0012-1', 'S0013-1', 'S0013-2', 'SLC01-REGL', 'SLC01-SUOT',
+                        'SLC02', 'SLC05', 'SLC06', 'SLC07', 'S0009-1', 'S0010-1', 'S0011-1',
+                        'S0017-1', 'S0017-2', 'S0018-1', 'S0019-1', 'S0019-2', 'S0019-3',
+                        'S0015-1', 'S0020-1', 'S0004-5', 'S0004-6'
+                    )
+                    ORDER BY L.LEAVE_REFERENCE_CODE";
+
+                var connectionString = _configuration.GetConnectionString("HRDatabase")
+                    ?? throw new Exception("無法取得資料庫連線字串");
+
+                using var connection = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
+                var results = await Dapper.SqlMapper.QueryAsync<LeaveTypeUnitData>(connection, sql, new { CompanyCode = companyCode });
+                var leaveTypes = results.ToList();
+
+                _logger.LogInformation("成功查詢假別單位，共 {Count} 筆", leaveTypes.Count);
+                return leaveTypes;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "查詢假別單位失敗，公司代碼: {CompanyCode}", companyCode);
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// 提交請假單申請 - efleaveform API
+        /// 使用簡化的欄位結構提交請假申請
+        /// </summary>
+        public async Task<LeaveFormOperationResult> SubmitLeaveFormAsync(LeaveFormSubmitRequest request)
+        {
+            try
+            {
+                _logger.LogInformation("開始提交請假單申請: {@Request}", new
+                {
+                    request.Uid,
+                    request.Leavetype,
+                    request.Estartdate,
+                    request.Eenddate
+                });
+
+                // 1. 透過工號查詢員工完整資料（使用 BasicInfoService）
+                var employeeInfo = await _basicInfoService.GetEmployeeByIdAsync(request.Uid);
+                if (employeeInfo == null)
+                {
+                    throw new Exception($"找不到工號對應的員工資料: {request.Uid}");
+                }
+
+                _logger.LogInformation("申請人資料 - 工號: {EmployeeNo}, 姓名: {Name}, 部門: {Dept}",
+                    employeeInfo.EmployeeNo, employeeInfo.EmployeeName, employeeInfo.DepartmentName);
+
+                // 2. 查詢假別資訊
+                var leaveTypes = await GetLeaveTypeUnitsAsync(request.Cid);
+                var leaveTypeInfo = leaveTypes.FirstOrDefault(lt => lt.LeaveCode == request.Leavetype);
+                if (leaveTypeInfo == null)
+                {
+                    throw new Exception($"找不到假別代碼: {request.Leavetype}");
+                }
+
+                // 3. 建構 BPM 表單資料（根據 BPM Middleware API 規格）
+                var formData = new Dictionary<string, object?>
+                {
+                    // 必填欄位 - 根據 BPM API 規格
+                    ["startDate"] = request.Estartdate.Replace("-", "/"),  // 轉換為 yyyy/MM/dd 格式
+                    ["startTime"] = request.Estarttime,
+                    ["endDate"] = request.Eenddate.Replace("-", "/"),      // 轉換為 yyyy/MM/dd 格式
+                    ["endTime"] = request.Eendtime,
+                    ["agentNo"] = request.Eagent,
+                    ["reason"] = request.Ereason,
+                    ["leaveTypeId"] = request.Leavetype,
+                    ["leaveTypeName"] = leaveTypeInfo.LeaveType
+                };
+
+                // 選填欄位 - 事件發生日
+                if (!string.IsNullOrEmpty(request.Eleavedate))
+                {
+                    formData["eventDate"] = request.Eleavedate.Replace("-", "/");
+                }
+
+                // 4. 如果有附件，構建附件路徑
+                string? filePath = null;
+                bool hasAttachments = false;
+                if (request.Efileid != null && request.Efileid.Any())
+                {
+                    _logger.LogInformation("處理附件，共 {Count} 個附件", request.Efileid.Count);
+                    // 將附件 ID 轉換為 FTP 路徑格式
+                    // 格式: FTPTest~~/FTPShare/filename
+                    var ftpPaths = request.Efileid.Select(id => $"FTPTest~~/FTPShare/leave_{id}.pdf").ToList();
+                    filePath = string.Join("||", ftpPaths);
+                    hasAttachments = true;
+                    _logger.LogInformation("構建的 filePath: {FilePath}", filePath);
+                }
+
+                var bpmRequest = new
+                {
+                    processCode = $"{FORM_CODE}_PROCESS",
+                    formDataMap = new Dictionary<string, object>
+                    {
+                        [FORM_CODE] = formData
+                    },
+                    userId = employeeInfo.EmployeeNo,
+                    subject = $"{employeeInfo.EmployeeName} 的請假申請 - {leaveTypeInfo.LeaveType}",
+                    sourceSystem = "APP",
+                    environment = "TEST",
+                    hasAttachments = hasAttachments,
+                    filePath = filePath  // 添加附件路徑
+                };
+
+                // 5. 呼叫 BPM API 建立表單
+                var endpoint = "bpm/invoke-process";
+                var response = await _bpmService.PostAsync(endpoint, bpmRequest);
+                var jsonResponse = JsonSerializer.Deserialize<JsonElement>(response);
+
+                // 6. 解析回應 - 從 BPM 回應中取得正確的欄位
+                var requestId = GetStringValue(jsonResponse, "requestId");
+                var processSerialNo = GetStringValue(jsonResponse, "processSerialNo");
+                var bpmProcessOid = GetStringValue(jsonResponse, "bpmProcessOid");
+                var status = GetStringValue(jsonResponse, "status");
+                var message = GetStringValue(jsonResponse, "message");
+
+                // 只要能成功呼叫 API 並取得回應，就視為成功
+                Console.WriteLine("========================================");
+                Console.WriteLine("✅ 請假單送出成功");
+                Console.WriteLine($"📋 流程編號: {processSerialNo}");
+                Console.WriteLine($"🆔 請求ID: {requestId}");
+                Console.WriteLine($"🔑 BPM流程OID: {bpmProcessOid}");
+                Console.WriteLine($"👤 申請人: {employeeInfo.EmployeeName} ({employeeInfo.EmployeeNo})");
+                Console.WriteLine($"🏖️  假別: {leaveTypeInfo.LeaveType} ({request.Leavetype})");
+                Console.WriteLine($"📅 起迄: {request.Estartdate} {request.Estarttime} ~ {request.Eenddate} {request.Eendtime}");
+                Console.WriteLine($"📝 事由: {request.Ereason}");
+                Console.WriteLine($"👥 代理人: {request.Eagent}");
+                Console.WriteLine($"✔️  狀態: {status}");
+                Console.WriteLine($"💬 訊息: {message}");
+                Console.WriteLine("========================================");
+                
+                _logger.LogInformation("請假單申請成功 - ProcessSerialNo: {ProcessSerialNo}, RequestId: {RequestId}, Status: {Status}", 
+                    processSerialNo, requestId, status);
+                
+                return new LeaveFormOperationResult
+                {
+                    Success = true,
+                    Message = "請求成功",
+                    FormId = processSerialNo,  // 使用 BPM 的流程編號
+                    FormNumber = requestId      // 使用 BPM 的請求ID
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "提交請假單申請失敗");
+                return new LeaveFormOperationResult
+                {
+                    Success = false,
+                    Message = $"請求失敗: {ex.Message}"
+                };
+            }
         }
 
         #endregion

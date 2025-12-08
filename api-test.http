@@ -28,3 +28,91 @@ GET {{baseUrl}}/api/OutingForm/test-ftp
 
 ### 測試 6: 查詢待簽核外出單
 GET {{baseUrl}}/api/OutingForm/pending?ApproverEmail=manager@company.com
+
+### ==== 加班單 API 測試 ====
+
+### 測試: 加班單預申請 (efotapply)
+# 注意: efileid 應該從附件上傳 API 取得
+# 請先呼叫: POST http://54.46.24.34:5112/api/Attachment/Upload
+# 從回應中取得 tfileid 後，填入下方的 efileid 陣列中
+POST {{baseUrl}}/app/efotapply
+Content-Type: application/json
+
+{
+    "tokenid": "53422421",
+    "cid": "45624657",
+    "uid": "0325",
+    "estartdate": "2025-09-18",
+    "estarttime": "18:00",
+    "eenddate": "2025-09-18",
+    "eendtime": "21:00",
+    "ereason": "專案趕工",
+    "eprocess": "C",
+    "efiletype": "D",
+    "efileid": ["1", "2"]
+}
+
+### 測試: 加班確認提交 (fotconfirm) - 提交實際發生的加班申請表單
+POST {{baseUrl}}/app/fotconfirm
+Content-Type: application/json
+
+{
+    "tokenid": "53422421",
+    "cid": "45624657",
+    "uid": "0325",
+    "formid": "PI-HR-H1A-PKG-Test0000000000053",
+    "astartdate": "2025-09-18",
+    "astarttime": "19:00",
+    "aenddate": "2025-09-18",
+    "aendtime": "22:00",
+    "efiletype": "D",
+    "efileid": ["4", "5", "80"]
+}
+
+### 測試: 加班確認申請列表 (efotconfirmlist)
+POST {{baseUrl}}/app/efotconfirmlist
+Content-Type: application/json
+
+{
+    "tokenid": "53422421",
+    "cid": "45624657",
+    "uid": "0325"
+}
+
+### 測試: 加班單詳情預覽 (efotpreview)
+POST {{baseUrl}}/app/efotpreview
+Content-Type: application/json
+
+{
+    "tokenid": "53422421",
+    "cid": "45624657",
+    "uid": "0325",
+    "formid": "PI-HR-H1A-PKG-Test0000000000053"
+}
+
+### 測試: 加班單確認申請送出 (efotconfirm)
+POST {{baseUrl}}/app/efotconfirm
+Content-Type: application/json
+
+{
+    "tokenid": "53422421",
+    "cid": "45624657",
+    "uid": "0325",
+    "formid": "PI-HR-H1A-PKG-Test0000000000053",
+    "astartdate": "2025-09-18",
+    "astarttime": "19:00",
+    "aenddate": "2025-09-18",
+    "aendtime": "22:00",
+    "efiletype": "D",
+    "efileid": ["4", "5", "80"]
+}
+
+### 測試: 代理人資料查詢 (getagent)
+POST {{baseUrl}}/app/getagent
+Content-Type: application/json
+
+{
+    "tokenid": "53422421",
+    "cid": "03546618",
+    "uid": "0325"
+}

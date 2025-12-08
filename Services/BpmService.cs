@@ -1,5 +1,6 @@
 ﻿using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 using HRSystemAPI.Models;
 
@@ -83,7 +84,46 @@ namespace HRSystemAPI.Services
                 var jsonContent = JsonSerializer.Serialize(data, new JsonSerializerOptions 
                 { 
                     WriteIndented = true,
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+                });
+                var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                _logger.LogInformation("發送 POST 請求: {Endpoint}, 資料: {Data}", endpoint, jsonContent);
+
+                var response = await _httpClient.PostAsync(endpoint, content);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorBody = await response.Content.ReadAsStringAsync();
+                    _logger.LogError("POST 請求失敗: {StatusCode}, {Body}", response.StatusCode, errorBody);
+                    throw new Exception($"POST 請求失敗: {response.StatusCode} - {errorBody}");
+                }
+
+                var responseBody = await response.Content.ReadAsStringAsync();
+                _logger.LogDebug("POST 請求成功: {Response}", responseBody);
+                
+                return responseBody;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "POST 請求時發生錯誤: {Endpoint}", endpoint);
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// POST 請求（不使用 CamelCase - 用於特殊格式如 formDataMap）
+        /// </summary>
+        public async Task<string> PostAsyncWithoutCamelCase(string endpoint, object data)
+        {
+            try
+            {
+                var jsonContent = JsonSerializer.Serialize(data, new JsonSerializerOptions 
+                { 
+                    WriteIndented = true,
+                    PropertyNamingPolicy = null,  // 不轉換大小寫，保持原始名稱
+                    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
                 });
                 var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 

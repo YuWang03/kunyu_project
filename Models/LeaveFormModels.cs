@@ -6,6 +6,174 @@ namespace HRSystemAPI.Models
     #region Request Models
 
     /// <summary>
+    /// 請假假別單位查詢請求 - efleaveformunit API
+    /// </summary>
+    public class LeaveTypeUnitRequest
+    {
+        /// <summary>
+        /// Token標記（必填）
+        /// </summary>
+        [Required(ErrorMessage = "tokenid 為必填")]
+        public string Tokenid { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 目前所屬公司（必填）
+        /// </summary>
+        [Required(ErrorMessage = "cid 為必填")]
+        public string Cid { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 使用者工號（必填）
+        /// </summary>
+        [Required(ErrorMessage = "uid 為必填")]
+        public string Uid { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// 請假假別單位查詢回應 - efleaveformunit API
+    /// </summary>
+    public class LeaveTypeUnitResponse
+    {
+        /// <summary>
+        /// 是否成功（200=成功, 203=失敗）
+        /// </summary>
+        public string Code { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 失敗訊息
+        /// </summary>
+        public string Msg { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 數據返回區（成功時有此區，失敗時無此區）
+        /// </summary>
+        public List<LeaveTypeUnitData>? Data { get; set; }
+    }
+
+    /// <summary>
+    /// 假別單位資料
+    /// </summary>
+    public class LeaveTypeUnitData
+    {
+        /// <summary>
+        /// 假別名稱
+        /// </summary>
+        public string LeaveType { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 請假最小單位
+        /// </summary>
+        public string LeaveUnit { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 假別代碼
+        /// </summary>
+        public string LeaveCode { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 假別單位類型
+        /// </summary>
+        public string LeaveUnitType { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// 請假單申請請求 - efleaveform API
+    /// </summary>
+    public class LeaveFormSubmitRequest
+    {
+        /// <summary>
+        /// Token標記（必填）
+        /// </summary>
+        [Required(ErrorMessage = "tokenid 為必填")]
+        public string Tokenid { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 目前所屬公司（必填）
+        /// </summary>
+        [Required(ErrorMessage = "cid 為必填")]
+        public string Cid { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 使用者工號（必填）
+        /// </summary>
+        [Required(ErrorMessage = "uid 為必填")]
+        public string Uid { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 假別代碼（必填）
+        /// </summary>
+        [Required(ErrorMessage = "leavetype 為必填")]
+        public string Leavetype { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 請假起始日期（必填）- 格式：yyyy-MM-dd
+        /// </summary>
+        [Required(ErrorMessage = "estartdate 為必填")]
+        public string Estartdate { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 起始時間（必填）- 格式：HH:mm
+        /// </summary>
+        [Required(ErrorMessage = "estarttime 為必填")]
+        public string Estarttime { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 請假結束日期（必填）- 格式：yyyy-MM-dd
+        /// </summary>
+        [Required(ErrorMessage = "eenddate 為必填")]
+        public string Eenddate { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 截止時間（必填）- 格式：HH:mm
+        /// </summary>
+        [Required(ErrorMessage = "eendtime 為必填")]
+        public string Eendtime { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 請假事件發生日（選填，婚假、產假必填）- 格式：yyyy-MM-dd
+        /// </summary>
+        public string? Eleavedate { get; set; }
+
+        /// <summary>
+        /// 事由（必填）
+        /// </summary>
+        [Required(ErrorMessage = "ereason 為必填")]
+        public string Ereason { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 代理人工號（必填）
+        /// </summary>
+        [Required(ErrorMessage = "eagent 為必填")]
+        public string Eagent { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 附件檔案格式（選填）- C: 請假附件檔
+        /// </summary>
+        public string? Efiletype { get; set; }
+
+        /// <summary>
+        /// 附件檔案編號（選填）
+        /// </summary>
+        public List<string>? Efileid { get; set; }
+    }
+
+    /// <summary>
+    /// 請假單申請回應 - efleaveform API
+    /// </summary>
+    public class LeaveFormSubmitResponse
+    {
+        /// <summary>
+        /// 是否成功（200=成功, 203=失敗）
+        /// </summary>
+        public string Code { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 訊息
+        /// </summary>
+        public string Msg { get; set; } = string.Empty;
+    }
+
+    /// <summary>
     /// 請假單查詢條件
     /// </summary>
     public class LeaveFormQueryRequest
@@ -736,6 +904,11 @@ namespace HRSystemAPI.Models
     /// </summary>
     public class BpmCreateFormRequest
     {
+        /// <summary>
+        /// 流程代碼（必填）
+        /// </summary>
+        public string ProcessCode { get; set; } = string.Empty;
+
         /// <summary>
         /// 表單代碼
         /// </summary>

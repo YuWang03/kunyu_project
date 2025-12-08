@@ -1,5 +1,6 @@
 using HRSystemAPI.Models;
 using HRSystemAPI.Services;
+using HRSystemAPI.Filters;
 using Microsoft.AspNetCore.Mvc;
 
 namespace HRSystemAPI.Controllers
@@ -10,6 +11,7 @@ namespace HRSystemAPI.Controllers
     [ApiController]
     [Route("api/[controller]")]
     [Tags("PI_BUSINESS_TRIP_001")]
+    [ServiceFilter(typeof(TokenValidationFilter))]
     public class BusinessTripFormController : ControllerBase
     {
         private readonly IBusinessTripFormService _businessTripFormService;
@@ -23,6 +25,7 @@ namespace HRSystemAPI.Controllers
             _logger = logger;
         }
 
+#if false // 暫時隱藏 - BPM 中間件不支援申請 API
         /// <summary>
         /// 申請出差表單（支援附件上傳）- 使用 PI_BUSINESS_TRIP_001
         /// </summary>
@@ -103,5 +106,6 @@ namespace HRSystemAPI.Controllers
                 return StatusCode(500, new { message = "申請出差表單時發生錯誤", error = ex.Message });
             }
         }
+#endif // 申請 API 暫時隱藏
     }
 }

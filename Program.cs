@@ -1,5 +1,6 @@
 ﻿using HRSystemAPI.Models;
 using HRSystemAPI.Services;
+using HRSystemAPI.Filters;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -16,16 +17,46 @@ builder.Services.AddControllers();
 
 // ===== 註冊原有服務 =====
 builder.Services.AddScoped<IBasicInfoService, BasicInfoService>();
-builder.Services.AddScoped<IAttendanceService, AttendanceService>();
-builder.Services.AddScoped<ILeaveRemainService, LeaveRemainService>();
+// builder.Services.AddScoped<IAttendanceService, AttendanceService>(); // 舊版 AttendanceQuery，已棄用
+builder.Services.AddScoped<IWorkQueryService, WorkQueryService>(); // 考勤查詢服務 (原 AttendanceService)
+// builder.Services.AddScoped<ILeaveRemainService, LeaveRemainService>(); // 舊版，已棄用
+builder.Services.AddScoped<ILeaveBalanceService, LeaveBalanceService>(); // 新版請假餘額查詢服務
 builder.Services.AddScoped<IOvertimeFormService, OvertimeFormService>();
 builder.Services.AddScoped<ILeaveFormService, LeaveFormService>();
 builder.Services.AddScoped<IAttendanceFormService, AttendanceFormService>();
 builder.Services.AddScoped<IBusinessTripFormService, BusinessTripFormService>();
+builder.Services.AddScoped<IAttendancePatchFormService, AttendancePatchFormService>();
+builder.Services.AddScoped<ILeaveOutFormService, LeaveOutFormService>();
+builder.Services.AddScoped<IWorkSetService, WorkSetService>(); // 考勤超時出勤設定服務
+builder.Services.AddScoped<ICancelLeaveService, CancelLeaveService>(); // 銷假單服務
+builder.Services.AddScoped<IReviewService, ReviewService>(); // 待我審核服務
+
+// ===== 註冊薪資查詢服務 =====
+builder.Services.AddScoped<ISalaryService, SalaryService>();
+
+// ===== 註冊 Token 驗證服務 =====
+builder.Services.AddScoped<ITokenValidationService, TokenValidationService>();
+builder.Services.AddScoped<TokenValidationFilter>();
+
+// ===== 註冊電子表單選單服務 =====
+builder.Services.AddScoped<IEFormsMenuService, EFormsMenuService>();
+
+// ===== 註冊我的表單服務 =====
+builder.Services.AddScoped<IEFormMyService, EFormMyService>();
+
+// ===== 註冊簽核記錄詳細資料服務 =====
+builder.Services.AddScoped<IEFormRecordService, EFormRecordService>();
+
+// ===== 註冊簽核記錄撤回服務 =====
+builder.Services.AddScoped<IEFormWithdrawService, EFormWithdrawService>();
 
 // ===== 註冊 FTP 和 BPM 設定 =====
 builder.Services.Configure<FtpSettings>(builder.Configuration.GetSection("FtpSettings"));
 builder.Services.Configure<BpmSettings>(builder.Configuration.GetSection("BpmSettings"));
+
+// ===== 註冊 SMTP 和薪資驗證設定 =====
+builder.Services.Configure<SmtpSettings>(builder.Configuration.GetSection("SmtpSettings"));
+builder.Services.Configure<SalaryVerificationSettings>(builder.Configuration.GetSection("SalaryVerification"));
 
 // ===== 註冊 HttpClient（使用 Header 認證）=====
 // ⭐⭐⭐ 重要:BPM API 使用 X-API-Key 和 X-API-Secret Header 進行認證 ⭐⭐⭐
@@ -61,9 +92,18 @@ builder.Services.AddHttpClient("BpmClient", (serviceProvider, client) =>
     }
 });
 
+// ===== 註冊 Token 驗證專用 HttpClient =====
+builder.Services.AddHttpClient("TokenValidationClient", client =>
+{
+    // 設定較短的超時時間以加快故障檢測（Token 驗證 API 應該快速回應）
+    client.Timeout = TimeSpan.FromSeconds(5);
+    client.DefaultRequestHeaders.Add("Accept", "application/json");
+});
+
 // ===== 註冊服務 =====
 builder.Services.AddSingleton<FtpService>();
 builder.Services.AddScoped<BpmService>();
+builder.Services.AddScoped<IBpmMiddlewareService, BpmMiddlewareService>();
 builder.Services.AddScoped<AttendanceFormService>();
 
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
@@ -158,9 +198,11 @@ builder.Services.AddSwaggerGen(c =>
         var order = controllerName switch
         {
             "Auth" => "1",
-            "BasicInformation" => "2",
-            "LeaveRemain" => "3",
-            "AttendanceQuery" => "4",
+            "BasicList" => "2",
+            "LeaveBalance" => "3", // 新版請假餘額查詢
+            // "LeaveRemain" => "3", // 舊版，已棄用
+            // "AttendanceQuery" => "4", // 舊版，已由 WorkQuery 取代
+            "WorkQuery" => "4", // 考勤查詢 (取代舊版 AttendanceQuery)
             "LeaveForm" => "5",
             "LeaveFormTest" => "5.1",
             "OutingForm" => "6",

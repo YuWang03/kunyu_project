@@ -1,63 +1,49 @@
 # 廣宇科技 APP API
 
-### 基本資料管理
-- 員工基本資訊查詢（工號、姓名、部門、職稱）
-- 組織架構資訊
-- 員工狀態管理
-
-### 考勤查詢系統
-- 個人出勤記錄查詢
-- 指定日期打卡記錄
-- 上下班刷卡時間追蹤
-- 異常狀態檢測與報告
-
-### 請假剩餘天數
-- 各類假別剩餘天數查詢（特休、事假、病假、補休假）
-- 周年制計算支援
-- 天數與小時數自動轉換
-
-### 未來功能（開發中）
--  薪資查詢系統
--  教育訓練時數管理
--  電子表單申請與簽核流程
-
-## 技術架構
-
-- **框架**: ASP.NET Core 8.0
-- **API 文件**: Swagger/OpenAPI 3.0
-- **資料存取**: Dapper + Entity Framework Core
-- **資料庫**: SQL Server
-- **身份驗證**: Keycloak OIDC
-- **架構模式**: Repository Pattern + Service Layer
-
 ## API 端點
 
 ### 基本資料管理
-- `GET /api/BasicInformation/info` - 查詢員工基本資訊
-- `GET /api/BasicInformation/all` - 查詢所有員工資訊
+- `POST /app/basiclist` - 取得基本資料選單列表
 
-### 考勤查詢
-- `GET /api/AttendanceQuery` - 查詢個人考勤記錄
-- `GET /api/AttendanceQuery/{date}` - 查詢指定日期考勤
+### 考勤管理
+- `POST /app/WorkQuery` - 個人考勤查詢列表
+- `POST /app/workset` - 考勤超時出勤設定
 
 ### 請假管理
-- `GET /api/Leaveremain` - 查詢假別剩餘天數
-- `POST /api/LeaveForm` - 提交請假表單
-- `GET /api/LeaveForm/{formId}` - 查詢請假表單
+- `POST /app/LeaveBalance` - 查詢個人請假餘額
+- `POST /app/efleaveformunit` - 查詢請假假別單位
+- `POST /app/efleaveform` - 提交請假單申請
+
+### 銷假管理
+- `POST /app/efleaveget` - 銷假申請列表（可銷假的請假單）
+- `POST /app/efleavedetail` - 銷假單詳細資料
+- `POST /app/efleavecancel` - 提交銷假申請
 
 ### 加班管理
-- `POST /api/OvertimeForm` - 提交加班表單
-- `GET /api/OvertimeForm/{formId}` - 查詢加班表單
+- `POST /app/efotapply` - 加班單預申請
+- `POST /app/efotpreview` - 加班單預覽（取得自動計算欄位）
+- `POST /app/efotconfirm` - 加班單確認送出
+- `POST /app/efotconfirmlist` - 加班單列表查詢
+- `POST /app/getagent` - 取得加班代理人資料
 
-### 出差管理
-- `POST /api/BusinessTripForm` - 提交出差表單
-- `GET /api/BusinessTripForm/{formId}` - 查詢出差表單
+### 外出外訓管理
+- `POST /app/efleaveout` - 提交外出或外訓申請單
+- `POST /app/efleaveout/cancel` - 提交外出外訓銷單
+
+### 附件上傳說明
+對於需要附件的 API（如 `/app/efleaveout` 和 `/app/efotapply`），請先使用外部附件上傳 API：
+1. 呼叫 `POST http://54.46.24.34:5112/api/Attachment/Upload` 上傳附件
+2. 從回應中取得 `tfileid`（附件檔序號）
+3. 將取得的 `tfileid` 填入對應 API 的 `efileid` 欄位中
+
+### 電子表單與審核
+- `POST /app/eformslist` - 電子表單選單列表
+- `POST /app/eformreview` - 待我審核列表
+- `POST /app/eformdetail` - 表單詳細資料
+- `POST /app/eformapproval` - 表單審核與意見提交
 
 ### 考勤異常
-- `POST /api/AttendanceForm` - 提交考勤異常表單
-- `GET /api/AttendanceForm/{formId}` - 查詢考勤異常表單
-
-## 環境設定
+- `POST /app/efpatch` - 提交出勤確認單（補登未刷卡）
 
 ### appsettings.json 設定
 
@@ -80,16 +66,4 @@
     "Timeout": 30
   }
 }
-```
-
-### 專案結構
-
-```
-HRSystemAPI/
-├── Controller/          # API 控制器
-├── Services/           # 業務邏輯服務層
-├── Models/             # 資料模型
-├── Pages/              # Razor Pages（如需要）
-├── wwwroot/            # 靜態檔案
-└── appsettings.json    # 設定檔
 ```

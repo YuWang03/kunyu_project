@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using HRSystemAPI.Models;
 using HRSystemAPI.Services;
+using HRSystemAPI.Filters;
 
 namespace HRSystemAPI.Controllers
 {
@@ -10,6 +11,7 @@ namespace HRSystemAPI.Controllers
     [ApiController]
     [Route("api/[controller]")]
     [Produces("application/json")]
+    [ServiceFilter(typeof(TokenValidationFilter))]
     public class AttendanceFormController : ControllerBase
     {
         private readonly IAttendanceFormService _attendanceFormService;
@@ -24,6 +26,8 @@ namespace HRSystemAPI.Controllers
         }
 
         #region 申請與操作 API
+
+#if false // 已註銷 - 2024-11-24
 
         /// <summary>
         /// 申請出勤異常單（支援附件上傳）
@@ -115,9 +119,13 @@ namespace HRSystemAPI.Controllers
             }
         }
 
+#endif // 已註銷 - POST /api/AttendanceForm
+
         #endregion
 
         #region 查詢與管理 API
+
+#if false // 已註銷 - 2024-11-24
 
         /// <summary>
         /// 查詢出勤異常單列表
@@ -352,6 +360,8 @@ namespace HRSystemAPI.Controllers
                 });
             }
         }
+
+#endif // 已註銷 - GET /forms, GET /forms/{id}, POST /forms/{id}/cancel, POST /workitems/{id}/return
 
         #endregion
 

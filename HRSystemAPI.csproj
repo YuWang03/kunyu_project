@@ -8,7 +8,6 @@
 
   <ItemGroup>
     <Compile Remove="Models\AttendanceStatusCode.cs" />
-    <Compile Remove="Models\BasicInformation.cs" />
     <Compile Remove="Services\AttendanceService..cs" />
   </ItemGroup>
 
@@ -21,6 +20,7 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="MySqlConnector" Version="2.5.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="9.0.6" />
   </ItemGroup>
 

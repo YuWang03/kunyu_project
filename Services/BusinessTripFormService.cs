@@ -111,6 +111,7 @@ namespace HRSystemAPI.Services
                 // 5. 呼叫 BPM API 建立表單
                 var bpmRequest = new BpmCreateFormRequest
                 {
+                    ProcessCode = FORM_CODE,
                     FormCode = FORM_CODE,
                     FormVersion = FORM_VERSION,
                     UserId = employeeInfo.EmployeeNo,

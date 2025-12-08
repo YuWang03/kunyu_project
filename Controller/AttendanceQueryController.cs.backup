@@ -1,0 +1,425 @@
+﻿using HRSystemAPI.Models;
+using HRSystemAPI.Services;
+using HRSystemAPI.Filters;
+using Microsoft.AspNetCore.Mvc;
+
+namespace HRSystemAPI.Controllers
+{
+    /// <summary>
+    /// 3. 考勤查詢 API
+    /// </summary>
+    [ApiController]
+    [Route("api/[controller]")]
+    [Tags("3. 考勤查詢")]
+    [ServiceFilter(typeof(TokenValidationFilter))]
+    public class AttendanceQueryController : ControllerBase
+    {
+        private readonly IAttendanceService _attendanceService;
+        private readonly ILogger<AttendanceQueryController> _logger;
+
+        public AttendanceQueryController(
+            IAttendanceService attendanceService,
+            ILogger<AttendanceQueryController> logger)
+        {
+            _attendanceService = attendanceService;
+            _logger = logger;
+        }
+
+        /// <summary>
+        /// 查詢個人出勤記錄
+        /// </summary>
+        /// <param name="employeeNo">員工編號</param>
+        /// <param name="date">日期 (格式: yyyy-MM-dd，例如: 2025-10-28)</param>
+        /// <returns>當日出勤記錄</returns>
+        /// <remarks>
+        /// 查詢指定員工在指定日期的出勤記錄，包含：
+        /// - 上班刷卡時間與狀態
+        /// - 下班刷卡時間與狀態
+        /// 
+        /// 狀態說明：
+        /// - 正常：按時打卡
+        /// - 應刷未刷：未打卡（異常代碼 0）
+        /// - 遲到：上班打卡時間晚於應刷卡時間（異常代碼 1）
+        /// - 早退：下班打卡時間早於應刷卡時間（異常代碼 2）
+        /// - 超時出勤：打卡時間超過標準時間（異常代碼 3）
+        /// - 曠職：未打卡且無請假（異常代碼 4）
+        /// 
+        /// 範例請求：
+        ///     GET /api/AttendanceQuery?employeeNo=3536&amp;date=2025-10-28
+        /// 
+        /// 範例回應（正常打卡）：
+        /// 
+        ///     {
+        ///       "date": "2025/10/28",
+        ///       "clockInTime": "2025/10/28 08:00:00",
+        ///       "clockInStatus": "正常",
+        ///       "clockOutTime": "2025/10/28 17:30:00",
+        ///       "clockOutStatus": "正常",
+        ///       "clockInCode": "",
+        ///       "clockOutCode": ""
+        ///     }
+        /// 
+        /// 範例回應（應刷未刷）：
+        /// 
+        ///     {
+        ///       "date": "2025/10/28",
+        ///       "clockInTime": "應刷未刷",
+        ///       "clockInStatus": "應刷未刷",
+        ///       "clockOutTime": "應刷未刷",
+        ///       "clockOutStatus": "應刷未刷",
+        ///       "clockInCode": "0",
+        ///       "clockOutCode": "0"
+        ///     }
+        /// 
+        /// 範例回應（遲到 + 超時出勤）：
+        /// 
+        ///     {
+        ///       "date": "2025/10/31",
+        ///       "clockInTime": "2025/10/31 08:30:00",
+        ///       "clockInStatus": "遲到",
+        ///       "clockOutTime": "2025/10/31 21:00:00",
+        ///       "clockOutStatus": "超時出勤",
+        ///       "clockInCode": "1",
+        ///       "clockOutCode": "3"
+        ///     }
+        /// </remarks>
+        /// <response code="200">查詢成功，返回出勤記錄</response>
+        /// <response code="400">請求參數錯誤</response>
+        /// <response code="404">查無出勤記錄</response>
+        /// <response code="500">伺服器內部錯誤</response>
+        [HttpGet]
+        [ProducesResponseType(typeof(AttendanceRecord), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> GetAttendanceRecord(
+            [FromQuery] string employeeNo,
+            [FromQuery] string date)
+        {
+            // 參數驗證
+            if (string.IsNullOrWhiteSpace(employeeNo))
+            {
+                return BadRequest(new { message = "員工編號不可為空" });
+            }
+
+            if (string.IsNullOrWhiteSpace(date))
+            {
+                return BadRequest(new { message = "日期不可為空" });
+            }
+
+            // 驗證日期格式
+            if (!DateTime.TryParse(date, out _))
+            {
+                return BadRequest(new { message = "日期格式不正確，請使用 yyyy-MM-dd 格式（例如: 2025-10-28）" });
+            }
+
+            try
+            {
+                var record = await _attendanceService.GetAttendanceRecordAsync(employeeNo, date);
+
+                if (record == null)
+                {
+                    return NotFound(new
+                    {
+                        message = $"查無出勤記錄",
+                        employeeNo = employeeNo,
+                        date = date
+                    });
+                }
+
+                return Ok(record);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "查詢出勤記錄失敗: 員工編號={EmployeeNo}, 日期={Date}", employeeNo, date);
+                return StatusCode(500, new { message = "查詢出勤記錄時發生錯誤" });
+            }
+        }
+
+        /// <summary>
+        /// 查詢所有員工的出勤記錄（依日期）
+        /// </summary>
+        /// <param name="date">日期 (格式: yyyy-MM-dd，例如: 2025-10-28)</param>
+        /// <returns>所有員工的出勤記錄清單</returns>
+        /// <remarks>
+        /// 查詢指定日期所有員工的出勤記錄。
+        /// 
+        /// 範例請求：
+        ///     GET /api/AttendanceQuery/all?date=2025-10-28
+        /// 
+        /// 範例回應：
+        /// 
+        ///     [
+        ///       {
+        ///         "date": "2025/10/28",
+        ///         "clockInTime": "2025/10/28 08:00:00",
+        ///         "clockInStatus": "正常",
+        ///         "clockOutTime": "2025/10/28 17:30:00",
+        ///         "clockOutStatus": "正常",
+        ///         "clockInCode": "",
+        ///         "clockOutCode": ""
+        ///       },
+        ///       {
+        ///         "date": "2025/10/28",
+        ///         "clockInTime": "應刷未刷",
+        ///         "clockInStatus": "曠職",
+        ///         "clockOutTime": "應刷未刷",
+        ///         "clockOutStatus": "曠職",
+        ///         "clockInCode": "4",
+        ///         "clockOutCode": "4"
+        ///       }
+        ///     ]
+        /// </remarks>
+        /// <response code="200">查詢成功，返回出勤記錄清單</response>
+        /// <response code="400">請求參數錯誤</response>
+        /// <response code="500">伺服器內部錯誤</response>
+        [HttpGet("all")]
+        [ProducesResponseType(typeof(List<AttendanceRecord>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> GetAllAttendanceRecords([FromQuery] string date)
+        {
+            // 參數驗證
+            if (string.IsNullOrWhiteSpace(date))
+            {
+                return BadRequest(new { message = "日期不可為空" });
+            }
+
+            // 驗證日期格式
+            if (!DateTime.TryParse(date, out _))
+            {
+                return BadRequest(new { message = "日期格式不正確，請使用 yyyy-MM-dd 格式（例如: 2025-10-28）" });
+            }
+
+            try
+            {
+                var records = await _attendanceService.GetAllAttendanceRecordsAsync(date);
+
+                return Ok(new
+                {
+                    date = date,
+                    totalRecords = records.Count,
+                    records = records
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "查詢所有員工出勤記錄失敗: 日期={Date}", date);
+                return StatusCode(500, new { message = "查詢出勤記錄時發生錯誤" });
+            }
+        }
+
+        /// <summary>
+        /// 查詢個人月度出勤記錄
+        /// </summary>
+        /// <param name="request">考勤查詢請求</param>
+        /// <returns>月度出勤記錄</returns>
+        /// <remarks>
+        /// 查詢指定員工在指定月份的出勤記錄。
+        /// 
+        /// 範例請求：
+        /// 
+        ///     POST /api/AttendanceQuery/monthly
+        ///     {
+        ///       "tokenid": "53422421",
+        ///       "cid": "45624657",
+        ///       "uid": "0325",
+        ///       "wyearmonth": "2025-09"
+        ///     }
+        /// 
+        /// 範例回應（成功）：
+        /// 
+        ///     {
+        ///       "code": "200",
+        ///       "msg": "查詢成功",
+        ///       "data": {
+        ///         "ryear": "2025",
+        ///         "rmonth": "09",
+        ///         "records": [
+        ///           {
+        ///             "date": "2025-09-01",
+        ///             "onduty": "T",
+        ///             "clockin": "08:00:00",
+        ///             "checkin": "07:59:38",
+        ///             "statusin": "T",
+        ///             "clockout": "18:00:00",
+        ///             "checkout": "18:05:06",
+        ///             "statusout": "T"
+        ///           },
+        ///           {
+        ///             "date": "2025-09-02",
+        ///             "onduty": "T",
+        ///             "clockin": "08:00:00",
+        ///             "checkin": "07:55:38",
+        ///             "statusin": "T",
+        ///             "clockout": "18:00:00",
+        ///             "checkout": "19:55:00",
+        ///             "statusout": "F"
+        ///           },
+        ///           {
+        ///             "date": "2025-09-03",
+        ///             "onduty": "T",
+        ///             "clockin": "08:00:00",
+        ///             "checkin": "",
+        ///             "statusin": "",
+        ///             "clockout": "18:00:00",
+        ///             "checkout": "",
+        ///             "statusout": ""
+        ///           }
+        ///         ]
+        ///       }
+        ///     }
+        /// 
+        /// 範例回應（錯誤）：
+        /// 
+        ///     {
+        ///       "code": "500",
+        ///       "msg": "請求超時"
+        ///     }
+        /// </remarks>
+        /// <response code="200">查詢成功</response>
+        /// <response code="400">請求參數錯誤</response>
+        [HttpPost("monthly")]
+        [ProducesResponseType(typeof(AttendanceQueryResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(AttendanceQueryResponse), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> GetMonthlyAttendance([FromBody] AttendanceQueryRequest request)
+        {
+            // 參數驗證
+            if (!ModelState.IsValid)
+            {
+                return Ok(new AttendanceQueryResponse
+                {
+                    Code = "400",
+                    Msg = "請求參數錯誤"
+                });
+            }
+
+            try
+            {
+                // 解析年月
+                var yearMonthParts = request.WYearMonth.Split('-');
+                if (yearMonthParts.Length != 2)
+                {
+                    return Ok(new AttendanceQueryResponse
+                    {
+                        Code = "400",
+                        Msg = "年月格式不正確"
+                    });
+                }
+
+                var records = await _attendanceService.GetMonthlyAttendanceRecordsAsync(request.Uid, request.WYearMonth);
+
+                return Ok(new AttendanceQueryResponse
+                {
+                    Code = "200",
+                    Msg = "查詢成功",
+                    Data = new AttendanceData
+                    {
+                        RYear = yearMonthParts[0],
+                        RMonth = yearMonthParts[1],
+                        Records = records
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "查詢月度出勤記錄失敗: 員工編號={EmployeeNo}, 年月={YearMonth}", 
+                    request.Uid, request.WYearMonth);
+                
+                return Ok(new AttendanceQueryResponse
+                {
+                    Code = "500",
+                    Msg = "請求超時"
+                });
+            }
+        }
+
+        /// <summary>
+        /// 考勤超時出勤設定
+        /// </summary>
+        /// <param name="request">考勤超時出勤設定請求</param>
+        /// <returns>設定結果</returns>
+        /// <remarks>
+        /// 設定員工考勤超時出勤的原因說明。
+        /// 
+        /// 範例請求：
+        /// 
+        ///     POST /api/AttendanceQuery/overtime-setting
+        ///     {
+        ///       "tokenid": "53422421",
+        ///       "cid": "45624657",
+        ///       "uid": "0325",
+        ///       "wdate": "2025-09-02",
+        ///       "reason": "一時沒注意時間，工作太認真"
+        ///     }
+        /// 
+        /// 範例回應（成功）：
+        /// 
+        ///     {
+        ///       "code": "200",
+        ///       "msg": "請求成功"
+        ///     }
+        /// 
+        /// 範例回應（失敗）：
+        /// 
+        ///     {
+        ///       "code": "500",
+        ///       "msg": "請求超時"
+        ///     }
+        /// </remarks>
+        /// <response code="200">請求成功</response>
+        /// <response code="400">請求參數錯誤</response>
+        [HttpPost("overtime-setting")]
+        [ProducesResponseType(typeof(StandardApiResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(StandardApiResponse), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> SetOvertimeAttendance([FromBody] OvertimeAttendanceSettingRequest request)
+        {
+            // 參數驗證
+            if (!ModelState.IsValid)
+            {
+                return Ok(new StandardApiResponse
+                {
+                    Code = "400",
+                    Msg = "請求參數錯誤"
+                });
+            }
+
+            try
+            {
+                // 呼叫服務層處理超時出勤設定
+                var success = await _attendanceService.SetOvertimeAttendanceAsync(
+                    request.Uid, 
+                    request.WDate, 
+                    request.Reason);
+
+                if (success)
+                {
+                    return Ok(new StandardApiResponse
+                    {
+                        Code = "200",
+                        Msg = "請求成功"
+                    });
+                }
+                else
+                {
+                    return Ok(new StandardApiResponse
+                    {
+                        Code = "500",
+                        Msg = "請求超時"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "設定考勤超時出勤失敗: 員工編號={EmployeeNo}, 日期={Date}", 
+                    request.Uid, request.WDate);
+                
+                return Ok(new StandardApiResponse
+                {
+                    Code = "500",
+                    Msg = "請求超時"
+                });
+            }
+        }
+    }
+}
