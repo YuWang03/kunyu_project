@@ -89,7 +89,14 @@ namespace HRSystemAPI.Services
                 // 4. 處理附件
                 string? hdnFilePath = null;
                 
-                if (request.Efileid != null && request.Efileid.Any())
+                // 優先使用 efileurl（從附件上傳 API 取得的實際 URL）
+                if (!string.IsNullOrEmpty(request.Efileurl))
+                {
+                    hdnFilePath = request.Efileurl;
+                    _logger.LogInformation("使用上傳的 hdnFilePath: {FilePath}", hdnFilePath);
+                }
+                // 如果沒有 efileurl 但有 efileid，則根據 efileid 構建 FTP 路徑（向後相容性）
+                else if (request.Efileid != null && request.Efileid.Any())
                 {
                     _logger.LogInformation("處理附件，共 {Count} 個附件", request.Efileid.Count);
                     // 將附件 ID 轉換為 FTP 路徑格式

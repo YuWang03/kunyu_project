@@ -31,10 +31,30 @@
 - `POST /app/efleaveout/cancel` - 提交外出外訓銷單
 
 ### 附件上傳說明
-對於需要附件的 API（如 `/app/efleaveout` 和 `/app/efotapply`），請先使用外部附件上傳 API：
+對於需要附件的 API（如 `/app/efleaveout` 和 `/app/efotapply`），請使用外部附件上傳 API：
+
+**標準流程：**
 1. 呼叫 `POST http://54.46.24.34:5112/api/Attachment/Upload` 上傳附件
-2. 從回應中取得 `tfileid`（附件檔序號）
-3. 將取得的 `tfileid` 填入對應 API 的 `efileid` 欄位中
+2. 從回應中取得 `tfileurl`（附件 URL，例如：`/AppAttachments/3537/20251124001.docx`）
+3. 將 `tfileurl` 填入對應 API 的 `efileurl` 欄位中
+
+**範例回應：**
+```json
+{
+    "code": "200",
+    "msg": "上傳成功",
+    "data": {
+        "tfileid": "6",
+        "afilename": "kunyu_20251118_v1.docx",
+        "tfilename": "20251124001.docx",
+        "tfileurl": "/AppAttachments/3537/20251124001.docx"
+    }
+}
+```
+
+**向後相容性：**
+- 若僅提供 `efileid` 而不提供 `efileurl`，系統會自動生成 FTP 路徑（格式：`FTPTest~~/FTPShare/文件名.pdf`）
+- 建議優先使用 `efileurl`，以支援更多的儲存方式
 
 ### 電子表單與審核
 - `POST /app/eformslist` - 電子表單選單列表

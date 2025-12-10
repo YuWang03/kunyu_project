@@ -441,7 +441,7 @@ namespace HRSystemAPI.Models
         public string Ereason { get; set; } = string.Empty;
 
         [Required(ErrorMessage = "eprocess 為必填")]
-        public string Eprocess { get; set; } = string.Empty; // C: 补休, P: 加班費
+        public string Eprocess { get; set; } = string.Empty; // C: 補休, P: 加班費
 
         public string? Efiletype { get; set; } // D: 加班單預申請附件檔
 
@@ -451,6 +451,14 @@ namespace HRSystemAPI.Models
         /// 從回應中取得 tfileid（附件檔序號）後填入此欄位。
         /// </summary>
         public List<string>? Efileid { get; set; }
+
+        /// <summary>
+        /// 附件檔案 URL 路徑
+        /// 請先呼叫 http://54.46.24.34:5112/api/Attachment/Upload 上傳附件，
+        /// 從回應中取得 tfileurl（例如：/AppAttachments/3537/20251124001.docx），
+        /// 可傳入單個 URL 或多個 URL（用 || 分隔）。
+        /// </summary>
+        public string? Efileurl { get; set; }
     }
 
     /// <summary>
@@ -597,6 +605,14 @@ namespace HRSystemAPI.Models
         /// 從回應中取得 tfileid（附件檔序號）後填入此欄位。
         /// </summary>
         public List<string>? Efileid { get; set; }
+
+        /// <summary>
+        /// 附件檔案 URL 路徑
+        /// 請先呼叫 http://54.46.24.34:5112/api/Attachment/Upload 上傳附件，
+        /// 從回應中取得 tfileurl（例如：/AppAttachments/3537/20251124001.docx），
+        /// 可傳入單個 URL 或多個 URL（用 || 分隔）。
+        /// </summary>
+        public string? Efileurl { get; set; }
     }
 
     /// <summary>

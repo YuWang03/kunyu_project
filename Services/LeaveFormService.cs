@@ -1098,10 +1098,19 @@ namespace HRSystemAPI.Services
                     formData["eventDate"] = request.Eleavedate.Replace("-", "/");
                 }
 
-                // 4. 如果有附件，構建附件路徑
+                // 4. 如果有附件，使用 efileurl 或根據 efileid 構建附件路徑
                 string? filePath = null;
                 bool hasAttachments = false;
-                if (request.Efileid != null && request.Efileid.Any())
+                
+                // 優先使用 efileurl（從附件上傳 API 取得的實際 URL）
+                if (!string.IsNullOrEmpty(request.Efileurl))
+                {
+                    filePath = request.Efileurl;
+                    hasAttachments = true;
+                    _logger.LogInformation("使用上傳的 filePath: {FilePath}", filePath);
+                }
+                // 如果沒有 efileurl 但有 efileid，則根據 efileid 構建 FTP 路徑（向後相容性）
+                else if (request.Efileid != null && request.Efileid.Any())
                 {
                     _logger.LogInformation("處理附件，共 {Count} 個附件", request.Efileid.Count);
                     // 將附件 ID 轉換為 FTP 路徑格式

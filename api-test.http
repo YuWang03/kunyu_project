@@ -32,9 +32,10 @@ GET {{baseUrl}}/api/OutingForm/pending?ApproverEmail=manager@company.com
 ### ==== 加班單 API 測試 ====
 
 ### 測試: 加班單預申請 (efotapply)
-# 注意: efileid 應該從附件上傳 API 取得
-# 請先呼叫: POST http://54.46.24.34:5112/api/Attachment/Upload
-# 從回應中取得 tfileid 後，填入下方的 efileid 陣列中
+# 注意: 附件需要先上傳到附件服務
+# 1. 呼叫: POST http://54.46.24.34:5112/api/Attachment/Upload
+# 2. 從回應中取得 tfileurl (例如: /AppAttachments/3537/20251124001.docx)
+# 3. 將 tfileurl 填入下方的 efileurl 欄位，或使用 efileid + 自動生成的路徑
 POST {{baseUrl}}/app/efotapply
 Content-Type: application/json
 
@@ -49,7 +50,7 @@ Content-Type: application/json
     "ereason": "專案趕工",
     "eprocess": "C",
     "efiletype": "D",
-    "efileid": ["1", "2"]
+    "efileurl": "/AppAttachments/0325/20251124001.docx"
 }
 
 ### 測試: 加班確認提交 (fotconfirm) - 提交實際發生的加班申請表單

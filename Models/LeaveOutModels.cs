@@ -82,6 +82,14 @@ namespace HRSystemAPI.Models
         /// 從回應中取得 tfileid（附件檔序號）後填入此欄位。
         /// </summary>
         public List<string>? Efileid { get; set; }
+
+        /// <summary>
+        /// 附件檔案 URL 路徑
+        /// 請先呼叫 http://54.46.24.34:5112/api/Attachment/Upload 上傳附件，
+        /// 從回應中取得 tfileurl（例：/AppAttachments/3537/20251124001.docx），
+        /// 可傳入單個 URL 或多個 URL（用 || 分隔）。
+        /// </summary>
+        public string? Efileurl { get; set; }
     }
 
     #endregion
