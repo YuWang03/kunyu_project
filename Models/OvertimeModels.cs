@@ -549,6 +549,9 @@ namespace HRSystemAPI.Models
 
     public class EFotPreviewData
     {
+        public string Uid { get; set; } = string.Empty;
+        public string Uname { get; set; } = string.Empty;
+        public string Udepartment { get; set; } = string.Empty;
         public string Formid { get; set; } = string.Empty;
         public string Estartdate { get; set; } = string.Empty;
         public string Estarttime { get; set; } = string.Empty;
@@ -627,7 +630,7 @@ namespace HRSystemAPI.Models
     #region API: 加班確認提交 (fotconfirm POST)
 
     /// <summary>
-    /// 加班確認提交請求 (POST /app/fotconfirm)
+    /// 加班確認提交請求 (POST /app/efotconfirmlist)
     /// 提交實際發生的加班申請表單，填具實際的加班時間及所需附件後送出
     /// </summary>
     public class FotConfirmSubmitRequest
@@ -680,7 +683,7 @@ namespace HRSystemAPI.Models
     }
 
     /// <summary>
-    /// 加班確認提交回應 (POST /app/fotconfirm)
+    /// 加班確認提交回應 (POST /app/efotconfirmlist)
     /// </summary>
     public class FotConfirmSubmitResponse
     {

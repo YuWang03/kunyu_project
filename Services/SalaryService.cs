@@ -3,8 +3,8 @@ using Microsoft.Data.SqlClient;
 using MySqlConnector;
 using Microsoft.Extensions.Options;
 using Dapper;
-using System.Net;
-using System.Net.Mail;
+using MailKit.Net.Smtp;
+using MimeKit;
 
 namespace HRSystemAPI.Services
 {
@@ -40,7 +40,7 @@ namespace HRSystemAPI.Services
         }
 
         /// <summary>
-        /// 發送薪資查詢驗證碼至使用者信箱
+        /// 發送薪資查詢驗證碼至指定測試信箱
         /// </summary>
         public async Task<SendCodeResponse> SendVerificationCodeAsync(SendCodeRequest request)
         {
@@ -48,7 +48,7 @@ namespace HRSystemAPI.Services
             {
                 _logger.LogInformation($"發送驗證碼至使用者 {request.Uid}");
 
-                // 1. 從資料庫查詢使用者的 email
+                // 1. 從資料庫查詢使用者資料（用於取得使用者名稱）
                 var employee = await _basicInfoService.GetEmployeeByIdAsync(request.Uid);
                 if (employee == null)
                 {
@@ -57,16 +57,6 @@ namespace HRSystemAPI.Services
                     {
                         Code = "203",
                         Msg = "請求失敗，找不到使用者資料"
-                    };
-                }
-
-                if (string.IsNullOrEmpty(employee.Email))
-                {
-                    _logger.LogWarning($"使用者 {request.Uid} 沒有設定 Email");
-                    return new SendCodeResponse
-                    {
-                        Code = "203",
-                        Msg = "請求失敗，使用者未設定 Email"
                     };
                 }
 
@@ -87,23 +77,29 @@ namespace HRSystemAPI.Services
                     // MySQL 連接失敗，但仍然允許使用測試驗證碼進行測試
                 }
 
-                // 4. 透過 SMTP 發送驗證碼到使用者信箱
+                // 4. 透過 SMTP 發送驗證碼到指定測試信箱 ian888.chen@gmail.com
+                const string testEmail = "ian888.chen@gmail.com";
                 try
                 {
-                    await SendEmailAsync(employee.Email, employee.EmployeeName, verificationCode, _verificationSettings.CodeExpirationMinutes);
-                    _logger.LogInformation($"驗證碼已發送至 {employee.Email}");
+                    await SendEmailAsync(testEmail, employee.EmployeeName, verificationCode, _verificationSettings.CodeExpirationMinutes);
+                    _logger.LogInformation($"驗證碼已發送至測試信箱：{testEmail}（使用者：{request.Uid} - {employee.EmployeeName}）");
+                    
+                    // 確認信件發送成功後立即回傳成功
+                    return new SendCodeResponse
+                    {
+                        Code = "200",
+                        Msg = "請求成功"
+                    };
                 }
                 catch (Exception emailEx)
                 {
-                    _logger.LogError(emailEx, $"發送 Email 失敗，但驗證碼已儲存：{employee.Email}");
-                    // 即使發送失敗，驗證碼已儲存，可以使用測試驗證碼
+                    _logger.LogError(emailEx, $"發送 Email 失敗：{testEmail}");
+                    return new SendCodeResponse
+                    {
+                        Code = "203",
+                        Msg = "請求失敗，Email 發送失敗"
+                    };
                 }
-
-                return new SendCodeResponse
-                {
-                    Code = "200",
-                    Msg = "請求成功"
-                };
             }
             catch (Exception ex)
             {
@@ -275,43 +271,46 @@ namespace HRSystemAPI.Services
         }
 
         /// <summary>
-        /// 查詢教育訓練明細（目前為 Mock 實作，直接回傳範例資料）
+        /// 查詢教育訓練明細（先查詢資料庫，若無資料則回傳 Mock 資料）
         /// </summary>
         public async Task<EduViewResponse> GetEducationDetailsAsync(EduViewRequest request)
         {
             try
             {
+                // 驗證查詢年份（只能查詢近三年）
+                if (!ValidateQueryYear(request.Queryyear))
+                {
+                    _logger.LogWarning($"查詢年份不符合規則：{request.Queryyear}");
+                    return new EduViewResponse
+                    {
+                        Code = "203",
+                        Msg = "請求失敗，主要條件不符合"
+                    };
+                }
+
                 _logger.LogInformation($"查詢使用者 {request.Uid} 的教育訓練明細，查詢年份：{request.Queryyear}");
 
-                // Mock 實作：直接回傳固定範例資料（因為目前沒有真實 DB 資料）
+                // 先嘗試從資料庫查詢
+                var eduCourses = await QueryEducationDataFromDatabaseAsync(request);
+
+                // 如果資料庫無資料，使用 Mock 資料
+                if (eduCourses == null || eduCourses.Count == 0)
+                {
+                    _logger.LogInformation($"資料庫無資料，使用 Mock 資料");
+                    eduCourses = GetMockEducationData();
+                }
+
+                // 計算總時數
+                var totalHours = CalculateTotalHours(eduCourses);
+
                 var eduData = new EduViewData
                 {
-                    Edudata = new List<EduCourseItem>
-                    {
-                        new EduCourseItem 
-                        { 
-                            Classtype = "專業", 
-                            Classname = "高階程式設計", 
-                            Classhours = "3" 
-                        },
-                        new EduCourseItem 
-                        { 
-                            Classtype = "一般", 
-                            Classname = "商用英文會話", 
-                            Classhours = "3" 
-                        },
-                        new EduCourseItem 
-                        { 
-                            Classtype = "專業", 
-                            Classname = "專案管理實務", 
-                            Classhours = "2" 
-                        }
-                    },
+                    Edudata = eduCourses,
                     Yearhourstitle = "學分合計",
-                    Yearhours = "8"
+                    Yearhours = totalHours.ToString()
                 };
 
-                _logger.LogInformation($"成功取得使用者 {request.Uid} 的教育訓練明細（Mock 資料）");
+                _logger.LogInformation($"成功取得使用者 {request.Uid} 的教育訓練明細");
 
                 return new EduViewResponse
                 {
@@ -329,6 +328,99 @@ namespace HRSystemAPI.Services
                     Msg = "請求失敗，主要條件不符合"
                 };
             }
+        }
+
+        /// <summary>
+        /// 驗證查詢年份（只能查詢近三年）
+        /// </summary>
+        private bool ValidateQueryYear(string queryYear)
+        {
+            if (!int.TryParse(queryYear, out int year))
+            {
+                return false;
+            }
+
+            int currentYear = DateTime.Now.Year;
+            return year >= (currentYear - 2) && year <= currentYear;
+        }
+
+        /// <summary>
+        /// 從資料庫查詢教育訓練資料
+        /// </summary>
+        private async Task<List<EduCourseItem>> QueryEducationDataFromDatabaseAsync(EduViewRequest request)
+        {
+            try
+            {
+                using (var connection = new MySqlConnection(_mysqlConnectionString))
+                {
+                    string query = @"
+                        SELECT classtype AS Classtype, classname AS Classname, classhours AS Classhours 
+                        FROM education_training 
+                        WHERE uid = @uid 
+                        AND cid = @cid 
+                        AND queryyear = @queryyear
+                        ORDER BY classtype, classname";
+
+                    var result = await connection.QueryAsync<EduCourseItem>(query, new
+                    {
+                        uid = request.Uid,
+                        cid = request.Cid,
+                        queryyear = request.Queryyear
+                    });
+
+                    return result.ToList();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "查詢資料庫時發生錯誤");
+                // 發生錯誤時返回空列表，將使用假資料
+                return new List<EduCourseItem>();
+            }
+        }
+
+        /// <summary>
+        /// 取得假資料（當資料庫無資料時使用）
+        /// </summary>
+        private List<EduCourseItem> GetMockEducationData()
+        {
+            return new List<EduCourseItem>
+            {
+                new EduCourseItem
+                {
+                    Classtype = "專業",
+                    Classname = "高階程式設計",
+                    Classhours = "3"
+                },
+                new EduCourseItem
+                {
+                    Classtype = "一般",
+                    Classname = "商用英文會話",
+                    Classhours = "3"
+                },
+                new EduCourseItem
+                {
+                    Classtype = "專業",
+                    Classname = "專案管理實務",
+                    Classhours = "2"
+                }
+            };
+        }
+
+        /// <summary>
+        /// 計算課程總時數
+        /// </summary>
+        private int CalculateTotalHours(List<EduCourseItem> eduCourses)
+        {
+            int totalHours = 0;
+            foreach (var course in eduCourses)
+            {
+                if (int.TryParse(course.Classhours, out int hours))
+                {
+                    totalHours += hours;
+                }
+            }
+            return totalHours;
         }
 
         /// <summary>
@@ -468,17 +560,18 @@ namespace HRSystemAPI.Services
         {
             try
             {
-                using var smtpClient = new SmtpClient(_smtpSettings.Host, _smtpSettings.Port)
-                {
-                    EnableSsl = false, // Port 25 通常不使用 SSL
-                    Credentials = new NetworkCredential(_smtpSettings.Username, _smtpSettings.Password)
-                };
+                _logger.LogInformation($"準備發送 Email - Host: {_smtpSettings.Host}, Port: {_smtpSettings.Port}, From: {_smtpSettings.FromEmail}, To: {toEmail}");
+                
+                // 建立郵件訊息
+                var message = new MimeMessage();
+                message.From.Add(new MailboxAddress(_smtpSettings.FromName, _smtpSettings.FromEmail));
+                message.To.Add(new MailboxAddress(userName, toEmail));
+                message.Subject = "【廣宇科技】薪資查詢驗證碼";
 
-                var mailMessage = new MailMessage
+                // 設定郵件內容
+                var bodyBuilder = new BodyBuilder
                 {
-                    From = new MailAddress(_smtpSettings.FromEmail, _smtpSettings.FromName),
-                    Subject = "【廣宇科技】薪資查詢驗證碼",
-                    Body = $@"
+                    HtmlBody = $@"
 <html>
 <body style='font-family: Arial, sans-serif;'>
     <h2>薪資查詢驗證碼</h2>
@@ -496,18 +589,30 @@ namespace HRSystemAPI.Services
         {DateTime.Now:yyyy-MM-dd HH:mm:ss}
     </p>
 </body>
-</html>",
-                    IsBodyHtml = true
+</html>"
                 };
+                message.Body = bodyBuilder.ToMessageBody();
 
-                mailMessage.To.Add(toEmail);
-
-                await smtpClient.SendMailAsync(mailMessage);
+                // 使用 MailKit 的 SmtpClient
+                using var client = new MailKit.Net.Smtp.SmtpClient();
+                
+                _logger.LogInformation("正在連接 SMTP 伺服器...");
+                await client.ConnectAsync(_smtpSettings.Host, _smtpSettings.Port, MailKit.Security.SecureSocketOptions.None);
+                
+                _logger.LogInformation("正在進行 SMTP 驗證...");
+                await client.AuthenticateAsync(_smtpSettings.Username, _smtpSettings.Password);
+                
+                _logger.LogInformation("正在發送 Email...");
+                await client.SendAsync(message);
+                
+                _logger.LogInformation("正在中斷 SMTP 連接...");
+                await client.DisconnectAsync(true);
+                
                 _logger.LogInformation($"驗證碼 Email 已成功發送至：{toEmail}");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"發送驗證碼 Email 失敗：{toEmail}");
+                _logger.LogError(ex, $"發送驗證碼 Email 失敗：{toEmail} - {ex.GetType().Name}: {ex.Message}");
                 throw;
             }
         }

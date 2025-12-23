@@ -15,7 +15,8 @@
 - `POST /app/efleaveform` - 提交請假單申請
 
 ### 銷假管理
-- `POST /app/efleaveget` - 銷假申請列表（可銷假的請假單）
+- `POST /app/efleaveget` - 單筆請假資料查詢（根據 formid 查詢）
+- `POST /app/efleavelist` - 銷假申請列表（查詢自己提交的請假單，用於銷假）
 - `POST /app/efleavedetail` - 銷假單詳細資料
 - `POST /app/efleavecancel` - 提交銷假申請
 
@@ -70,20 +71,26 @@
 ```json
 {
   "ConnectionStrings": {
-    "HRDatabase": "Server=YOUR_SERVER;Database=YOUR_DB;User Id=YOUR_USER;Password=YOUR_PASSWORD;TrustServerCertificate=True;"
+    "HRDatabase": "Server=14.18.232.79,1433;Database=03546618;User Id=ehrapp;Password=***;TrustServerCertificate=True;",
+    "DefaultConnection": "Server=54.46.24.34;Port=3306;Database=AppHome;Uid=root;Pwd=***;"
   },
   "FtpSettings": {
-    "Host": "YOUR_FTP_HOST",
-    "Port": 21,
-    "Username": "YOUR_FTP_USER",
-    "Password": "YOUR_FTP_PASSWORD",
-    "UploadPath": "/uploads/attachments/"
+    "Host": "14.18.232.79",
+    "Port": 20105,
+    "Username": "ftpuser",
+    "Password": "***",
+    "UploadPath": "/AppAttachments/"
   },
   "BpmSettings": {
-    "ApiBaseUrl": "YOUR_BPM_API_URL",
-    "ApiKey": "YOUR_API_KEY",
-    "ApiSecret": "YOUR_API_SECRET",
+    "ApiBaseUrl": "http://60.248.158.147:8081/bpm-middleware/api/",
+    "ApiKey": "APP_ACKEY",
+    "ApiSecret": "***",
     "Timeout": 30
   }
 }
 ```
+
+**資料儲存架構：**
+- **SQL Server (14.18.232.79:1433)**: 儲存 HR 主要資料 (員工資訊、考勤等)
+- **MySQL (54.46.24.34:3306)**: 儲存表單同步資料 (bpm_forms 相關表)
+- **SFTP (14.18.232.79:20105)**: 儲存附件檔案 (D:/FTPShare/AppAttachments)

@@ -56,5 +56,10 @@ namespace HRSystemAPI.Models
         /// 電子信箱
         /// </summary>
         public string? Email { get; set; }
+
+        /// <summary>
+        /// 部門
+        /// </summary>
+        public string Department { get; set; } = string.Empty;
     }
 }

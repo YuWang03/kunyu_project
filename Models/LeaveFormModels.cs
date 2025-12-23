@@ -155,6 +155,11 @@ namespace HRSystemAPI.Models
         /// 附件檔案編號（選填）
         /// </summary>
         public List<string>? Efileid { get; set; }
+
+        /// <summary>
+        /// 附件檔案 URL（選填）- 從附件上傳 API 取得的實際檔案路徑
+        /// </summary>
+        public string? Efileurl { get; set; }
     }
 
     /// <summary>
@@ -171,6 +176,16 @@ namespace HRSystemAPI.Models
         /// 訊息
         /// </summary>
         public string Msg { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 表單編號（成功時回傳）
+        /// </summary>
+        public string? FormId { get; set; }
+
+        /// <summary>
+        /// 表單請求編號（成功時回傳）
+        /// </summary>
+        public string? FormNumber { get; set; }
     }
 
     /// <summary>

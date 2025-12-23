@@ -24,6 +24,15 @@ namespace HRSystemAPI.Services
         /// </summary>
         public async Task<MenuListResponse> GetMenuListAsync(string uid)
         {
+            // 預設語言為繁體中文
+            return await GetMenuListAsync(uid, "T");
+        }
+
+        /// <summary>
+        /// 取得基本資料選單列表（支援多語言）
+        /// </summary>
+        public async Task<MenuListResponse> GetMenuListAsync(string uid, string language)
+        {
             try
             {
                 // 驗證員工是否存在
@@ -35,26 +44,23 @@ namespace HRSystemAPI.Services
                     return new MenuListResponse
                     {
                         Code = "500",
-                        Msg = $"查無使用者ID: {uid}",
+                        Msg = GetErrorMessage(language, $"查無使用者ID: {uid}"),
                         Data = null
                     };
                 }
 
-                // 返回固定的選單列表
-                _logger.LogInformation($"成功取得使用者 {uid} 的選單列表");
+                // 根據語系取得選單列表
+                var menuList = GetMenuListByLanguage(language);
+
+                _logger.LogInformation($"成功取得使用者 {uid} 的選單列表 - Language: {language}");
 
                 return new MenuListResponse
                 {
                     Code = "200",
-                    Msg = "請求成功",
+                    Msg = GetSuccessMessage(language),
                     Data = new MenuData
                     {
-                        MenuList = new List<string>
-                        {
-                            "考勤查詢",
-                            "請假剩餘天數",
-                            "個人資訊"
-                        }
+                        MenuList = menuList
                     }
                 };
             }
@@ -64,7 +70,7 @@ namespace HRSystemAPI.Services
                 return new MenuListResponse
                 {
                     Code = "500",
-                    Msg = "請求超時",
+                    Msg = GetErrorMessage(language, "請求超時"),
                     Data = null
                 };
             }
@@ -74,11 +80,112 @@ namespace HRSystemAPI.Services
                 return new MenuListResponse
                 {
                     Code = "500",
-                    Msg = "請求超時",
+                    Msg = GetErrorMessage(language, "請求超時"),
                     Data = null
                 };
             }
         }
+
+        /// <summary>
+        /// 根據語系取得選單列表
+        /// </summary>
+        private List<string> GetMenuListByLanguage(string language)
+        {
+            // 預設為繁體中文
+            if (string.IsNullOrWhiteSpace(language))
+            {
+                language = "T";
+            }
+
+            language = language.ToUpper();
+
+            return language switch
+            {
+                "T" => GetChineseTraditionalMenu(),
+                "C" => GetChineseSimplifiedMenu(),
+                "TW" => GetChineseTraditionalMenu(),
+                "CN" => GetChineseSimplifiedMenu(),
+                _ => GetChineseTraditionalMenu() // 預設繁體中文
+            };
+        }
+
+        /// <summary>
+        /// 繁體中文選單
+        /// </summary>
+        private List<string> GetChineseTraditionalMenu()
+        {
+            return new List<string>
+            {
+                "考勤查詢",
+                "請假剩餘天數",
+                "個人資訊"
+            };
+        }
+
+        /// <summary>
+        /// 簡體中文選單
+        /// </summary>
+        private List<string> GetChineseSimplifiedMenu()
+        {
+            return new List<string>
+            {
+                "考勤查询",
+                "请假剩余天数",
+                "个人信息"
+            };
+        }
+
+        /// <summary>
+        /// 取得成功訊息（根據語系）
+        /// </summary>
+        private string GetSuccessMessage(string language)
+        {
+            if (string.IsNullOrWhiteSpace(language))
+            {
+                language = "T";
+            }
+
+            language = language.ToUpper();
+
+            return language switch
+            {
+                "T" => "請求成功",
+                "TW" => "請求成功",
+                "C" => "请求成功",
+                "CN" => "请求成功",
+                _ => "請求成功"
+            };
+        }
+
+        /// <summary>
+        /// 取得失敗訊息（根據語系）
+        /// </summary>
+        private string GetErrorMessage(string language, string defaultMessage)
+        {
+            if (string.IsNullOrWhiteSpace(language))
+            {
+                language = "T";
+            }
+
+            language = language.ToUpper();
+
+            // 如果是通用的預設訊息，則使用語言特定的版本
+            if (defaultMessage == "請求超時" || defaultMessage == "请求超时")
+            {
+                return language switch
+                {
+                    "T" => "請求超時",
+                    "TW" => "請求超時",
+                    "C" => "请求超时",
+                    "CN" => "请求超时",
+                    _ => "請求超時"
+                };
+            }
+
+            // 其他訊息直接返回
+            return defaultMessage;
+        }
+
 
         /// <summary>
         /// 驗證員工是否存在

@@ -17,24 +17,29 @@ namespace HRSystemAPI.Controllers
     {
         private readonly IReviewService _reviewService;
         private readonly ILogger<ReviewController> _logger;
+        private readonly IApiErrorLogService _errorLogService;
 
         public ReviewController(
             IReviewService reviewService,
-            ILogger<ReviewController> logger)
+            ILogger<ReviewController> logger,
+            IApiErrorLogService errorLogService)
         {
             _reviewService = reviewService;
             _logger = logger;
+            _errorLogService = errorLogService;
         }
 
         /// <summary>
         /// 1. 待我審核列表
         /// </summary>
         /// <remarks>
-        /// 準備由我審核的列表資訊
+        /// 準備由我審核的列表資訊，支援分頁與表單類型篩選
         /// 
         /// **功能說明**:
         /// - 從 BPM 系統取得待辦事項 (GET /api/bpm/workitems/{userId})
         /// - 整合各表單類型的詳細資料
+        /// - 支援依表單類型篩選（可複選）
+        /// - 支援分頁功能
         /// - 返回完整的待審核列表
         /// 
         /// **表單類型**:
@@ -45,12 +50,23 @@ namespace HRSystemAPI.Controllers
         /// - R: 出勤確認單
         /// - T: 出差單
         /// 
+        /// **請求參數說明**:
+        /// - tokenid: Token標記
+        /// - cid: 目前所屬公司
+        /// - uid: 使用者工號
+        /// - page: 目前要取第幾頁（通常從 1 開始）
+        /// - pagesize: 每頁要幾筆資料
+        /// - eformtype: 表單類型篩選，複選用逗號分隔（如 "L,D,R" 或 "D"），空字串表示查全部表單
+        /// 
         /// **請求範例**:
         /// ```json
         /// {
         ///   "tokenid": "53422421",
         ///   "cid": "45624657",
-        ///   "uid": "0325"
+        ///   "uid": "0325",
+        ///   "page": "1",
+        ///   "pagesize": "20",
+        ///   "eformtype": "L,D,R"
         /// }
         /// ```
         /// 
@@ -60,6 +76,11 @@ namespace HRSystemAPI.Controllers
         ///   "code": "200",
         ///   "msg": "請求成功",
         ///   "data": {
+        ///     "uid": "0325",
+        ///     "totalCount": "125",
+        ///     "page": "1",
+        ///     "pageSize": "20",
+        ///     "totalPages": "7",
         ///     "eformdata": [
         ///       {
         ///         "uname": "王大明",
@@ -77,9 +98,34 @@ namespace HRSystemAPI.Controllers
         ///         "eendtime": "17:00",
         ///         "ereasontitle": "事由",
         ///         "ereason": "家中有事"
+        ///       },
+        ///       {
+        ///         "uname": "王大明",
+        ///         "udepartment": "電子一部",
+        ///         "formidtitle": "表單編號",
+        ///         "formid": "PI-HR-H1A-PKG-Test0000000000045",
+        ///         "eformtypetitle": "申請類別",
+        ///         "eformtype": "R",
+        ///         "eformname": "出勤確認單",
+        ///         "estarttitle": "上班時間",
+        ///         "estartdate": "2025-09-18",
+        ///         "estarttime": "08:00",
+        ///         "eendtitle": "",
+        ///         "eenddate": "",
+        ///         "eendtime": "",
+        ///         "ereasontitle": "事由",
+        ///         "ereason": "忘記刷卡(臉)"
         ///       }
         ///     ]
         ///   }
+        /// }
+        /// ```
+        /// 
+        /// **回應範例 (失敗)**:
+        /// ```json
+        /// {
+        ///   "code": "203",
+        ///   "msg": "請求失敗，主要條件不符合"
         /// }
         /// ```
         /// </remarks>
@@ -102,16 +148,54 @@ namespace HRSystemAPI.Controllers
                 }
                 else
                 {
-                    return StatusCode(StatusCodes.Status203NonAuthoritative, response);
+                    // 記錄詳細錯誤到資料庫
+                    await _errorLogService.LogErrorAsync(
+                        endpoint: "/app/eformreview",
+                        httpMethod: "POST",
+                        requestBody: System.Text.Json.JsonSerializer.Serialize(request),
+                        errorCode: response.Code,
+                        errorMessage: response.Msg ?? "請求失敗",
+                        errorDetails: response.Msg,
+                        userId: request.Uid,
+                        companyId: request.Cid,
+                        tokenId: request.TokenId,
+                        clientIp: HttpContext.Connection.RemoteIpAddress?.ToString(),
+                        userAgent: HttpContext.Request.Headers["User-Agent"].ToString()
+                    );
+
+                    // 回傳簡單的錯誤訊息給 APP 端
+                    return StatusCode(StatusCodes.Status203NonAuthoritative, new ReviewListResponse
+                    {
+                        Code = "203",
+                        Msg = "請求失敗"
+                    });
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "待我審核列表 API 發生錯誤");
+
+                // 記錄詳細錯誤到資料庫
+                await _errorLogService.LogErrorAsync(
+                    endpoint: "/app/eformreview",
+                    httpMethod: "POST",
+                    requestBody: System.Text.Json.JsonSerializer.Serialize(request),
+                    errorCode: "500",
+                    errorMessage: "系統錯誤",
+                    errorDetails: ex.Message,
+                    stackTrace: ex.StackTrace,
+                    userId: request.Uid,
+                    companyId: request.Cid,
+                    tokenId: request.TokenId,
+                    clientIp: HttpContext.Connection.RemoteIpAddress?.ToString(),
+                    userAgent: HttpContext.Request.Headers["User-Agent"].ToString()
+                );
+
+                // 回傳簡單的錯誤訊息給 APP 端
                 return StatusCode(StatusCodes.Status203NonAuthoritative, new ReviewListResponse
                 {
                     Code = "203",
-                    Msg = "請求失敗，主要條件不符合"
+                    Msg = "請求失敗"
                 });
             }
         }
@@ -202,16 +286,54 @@ namespace HRSystemAPI.Controllers
                 }
                 else
                 {
-                    return StatusCode(StatusCodes.Status203NonAuthoritative, response);
+                    // 記錄詳細錯誤到資料庫
+                    await _errorLogService.LogErrorAsync(
+                        endpoint: "/app/eformdetail",
+                        httpMethod: "POST",
+                        requestBody: System.Text.Json.JsonSerializer.Serialize(request),
+                        errorCode: response.Code,
+                        errorMessage: response.Msg ?? "請求失敗",
+                        errorDetails: response.Msg,
+                        userId: request.Uid,
+                        companyId: request.Cid,
+                        tokenId: request.TokenId,
+                        clientIp: HttpContext.Connection.RemoteIpAddress?.ToString(),
+                        userAgent: HttpContext.Request.Headers["User-Agent"].ToString()
+                    );
+
+                    // 回傳簡單的錯誤訊息給 APP 端
+                    return StatusCode(StatusCodes.Status203NonAuthoritative, new ReviewDetailResponse
+                    {
+                        Code = "203",
+                        Msg = "請求失敗"
+                    });
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "待我審核詳細資料 API 發生錯誤");
+
+                // 記錄詳細錯誤到資料庫
+                await _errorLogService.LogErrorAsync(
+                    endpoint: "/app/eformdetail",
+                    httpMethod: "POST",
+                    requestBody: System.Text.Json.JsonSerializer.Serialize(request),
+                    errorCode: "500",
+                    errorMessage: "系統錯誤",
+                    errorDetails: ex.Message,
+                    stackTrace: ex.StackTrace,
+                    userId: request.Uid,
+                    companyId: request.Cid,
+                    tokenId: request.TokenId,
+                    clientIp: HttpContext.Connection.RemoteIpAddress?.ToString(),
+                    userAgent: HttpContext.Request.Headers["User-Agent"].ToString()
+                );
+
+                // 回傳簡單的錯誤訊息給 APP 端
                 return StatusCode(StatusCodes.Status203NonAuthoritative, new ReviewDetailResponse
                 {
                     Code = "203",
-                    Msg = "請求失敗，主要條件不符合"
+                    Msg = "請求失敗"
                 });
             }
         }
@@ -293,16 +415,54 @@ namespace HRSystemAPI.Controllers
                 }
                 else
                 {
-                    return StatusCode(StatusCodes.Status203NonAuthoritative, response);
+                    // 記錄詳細錯誤到資料庫
+                    await _errorLogService.LogErrorAsync(
+                        endpoint: "/app/eformapproval",
+                        httpMethod: "POST",
+                        requestBody: System.Text.Json.JsonSerializer.Serialize(request),
+                        errorCode: response.Code,
+                        errorMessage: response.Msg ?? "請求失敗",
+                        errorDetails: response.Msg,
+                        userId: request.Uid,
+                        companyId: request.Cid,
+                        tokenId: request.TokenId,
+                        clientIp: HttpContext.Connection.RemoteIpAddress?.ToString(),
+                        userAgent: HttpContext.Request.Headers["User-Agent"].ToString()
+                    );
+
+                    // 回傳簡單的錯誤訊息給 APP 端
+                    return StatusCode(StatusCodes.Status203NonAuthoritative, new ReviewApprovalResponse
+                    {
+                        Code = "203",
+                        Msg = "請求失敗"
+                    });
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "待我審核簽核作業 API 發生錯誤");
+
+                // 記錄詳細錯誤到資料庫
+                await _errorLogService.LogErrorAsync(
+                    endpoint: "/app/eformapproval",
+                    httpMethod: "POST",
+                    requestBody: System.Text.Json.JsonSerializer.Serialize(request),
+                    errorCode: "500",
+                    errorMessage: "系統錯誤",
+                    errorDetails: ex.Message,
+                    stackTrace: ex.StackTrace,
+                    userId: request.Uid,
+                    companyId: request.Cid,
+                    tokenId: request.TokenId,
+                    clientIp: HttpContext.Connection.RemoteIpAddress?.ToString(),
+                    userAgent: HttpContext.Request.Headers["User-Agent"].ToString()
+                );
+
+                // 回傳簡單的錯誤訊息給 APP 端
                 return StatusCode(StatusCodes.Status203NonAuthoritative, new ReviewApprovalResponse
                 {
                     Code = "203",
-                    Msg = "請求失敗，主要條件不符合"
+                    Msg = "請求失敗"
                 });
             }
         }

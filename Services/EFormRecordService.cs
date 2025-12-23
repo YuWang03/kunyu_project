@@ -12,6 +12,12 @@ namespace HRSystemAPI.Services
         private readonly IBasicInfoService _basicInfoService;
         private readonly ILogger<EFormRecordService> _logger;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="EFormRecordService"/> class.
+        /// </summary>
+        /// <param name="bpmService">The BPM service.</param>
+        /// <param name="basicInfoService">The basic info service.</param>
+        /// <param name="logger">The logger instance.</param>
         public EFormRecordService(
             BpmService bpmService,
             IBasicInfoService basicInfoService,
@@ -108,12 +114,12 @@ namespace HRSystemAPI.Services
                 // 4. 建立回應資料
                 var recordData = new EFormRecordData
                 {
-                    Uid = applicantId,
-                    UName = userName,
-                    UDepartment = userDepartment,
-                    FormId = request.FormId,
-                    EFormType = formType,
-                    EFormName = GetFormTypeName(formType)
+                    Uid = applicantId?.Trim() ?? "",
+                    UName = userName?.Trim() ?? "",
+                    UDepartment = userDepartment?.Trim() ?? "",
+                    FormId = request.FormId?.Trim() ?? "",
+                    EFormType = formType?.Trim() ?? "",
+                    EFormName = GetFormTypeName(formType ?? "L")?.Trim() ?? ""
                 };
 
                 // 5. 設定時間標題
@@ -152,7 +158,7 @@ namespace HRSystemAPI.Services
                 // 事由
                 recordData.EReason = TryGetStringValue(formData, 
                     "reason", "leaveReason", "overtimeReason", "exceptionDescription", 
-                    "tripPurpose", "businessTripPurpose", "description") ?? "";
+                    "tripPurpose", "businessTripPurpose", "description", "additionalReason", "justification") ?? "No reason provided";
 
                 // 代理人
                 recordData.EAgent = TryGetStringValue(formData, 
@@ -175,10 +181,10 @@ namespace HRSystemAPI.Services
 
                         attachments.Add(new EFormRecordAttachment
                         {
-                            EFileId = index.ToString(),
-                            EFileName = fileName,
-                            ESFileName = originalFileName,
-                            EFileUrl = fileUrl
+                            EFileId = index.ToString().Trim(),
+                            EFileName = fileName?.Trim() ?? "",
+                            ESFileName = originalFileName?.Trim() ?? "",
+                            EFileUrl = fileUrl?.Trim() ?? ""
                         });
                         index++;
                     }
@@ -186,13 +192,13 @@ namespace HRSystemAPI.Services
                 // 也檢查 filePath 欄位（可能是用 || 分隔的多個檔案路徑）
                 else if (formData.TryGetProperty("filePath", out var filePathElement))
                 {
-                    var filePath = filePathElement.GetString();
+                    var filePath = filePathElement.GetString()?.Trim();
                     if (!string.IsNullOrWhiteSpace(filePath))
                     {
                         var files = filePath.Split(new[] { "||" }, StringSplitOptions.RemoveEmptyEntries);
                         for (int i = 0; i < files.Length; i++)
                         {
-                            var file = files[i];
+                            var file = files[i].Trim();
                             var fileName = System.IO.Path.GetFileName(file);
                             attachments.Add(new EFormRecordAttachment
                             {
@@ -238,8 +244,8 @@ namespace HRSystemAPI.Services
 
                         formFlows.Add(new EFormRecordFlow
                         {
-                            WorkItem = workItem,
-                            WorkStatus = workStatus
+                            WorkItem = workItem?.Trim() ?? "",
+                            WorkStatus = workStatus?.Trim() ?? ""
                         });
                     }
                 }
@@ -331,7 +337,7 @@ namespace HRSystemAPI.Services
                 {
                     if (prop.ValueKind == JsonValueKind.String)
                     {
-                        var value = prop.GetString();
+                        var value = prop.GetString()?.Trim();
                         if (!string.IsNullOrWhiteSpace(value))
                         {
                             return value;
@@ -339,7 +345,11 @@ namespace HRSystemAPI.Services
                     }
                     else if (prop.ValueKind != JsonValueKind.Null)
                     {
-                        return prop.ToString();
+                        var stringValue = prop.ToString().Trim();
+                        if (!string.IsNullOrWhiteSpace(stringValue))
+                        {
+                            return stringValue;
+                        }
                     }
                 }
             }

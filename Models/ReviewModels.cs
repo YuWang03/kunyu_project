@@ -21,6 +21,17 @@ namespace HRSystemAPI.Models
         [Required]
         [JsonPropertyName("uid")]
         public string Uid { get; set; } = string.Empty;
+
+        [Required]
+        [JsonPropertyName("page")]
+        public string Page { get; set; } = "1";
+
+        [Required]
+        [JsonPropertyName("pagesize")]
+        public string PageSize { get; set; } = "20";
+
+        [JsonPropertyName("eformtype")]
+        public string EFormType { get; set; } = string.Empty;
     }
 
     /// <summary>
@@ -40,12 +51,30 @@ namespace HRSystemAPI.Models
 
     public class ReviewListData
     {
+        [JsonPropertyName("uid")]
+        public string Uid { get; set; } = string.Empty;
+
+        [JsonPropertyName("totalCount")]
+        public string TotalCount { get; set; } = "0";
+
+        [JsonPropertyName("page")]
+        public string Page { get; set; } = "1";
+
+        [JsonPropertyName("pageSize")]
+        public string PageSize { get; set; } = "20";
+
+        [JsonPropertyName("totalPages")]
+        public string TotalPages { get; set; } = "0";
+
         [JsonPropertyName("eformdata")]
         public List<ReviewListItem> EFormData { get; set; } = new();
     }
 
     public class ReviewListItem
     {
+        [JsonPropertyName("uid")]
+        public string Uid { get; set; } = string.Empty;
+
         [JsonPropertyName("uname")]
         public string UName { get; set; } = string.Empty;
 
@@ -332,11 +361,71 @@ namespace HRSystemAPI.Models
         [JsonPropertyName("processSerialNumber")]
         public string ProcessSerialNumber { get; set; } = string.Empty;
 
+        [JsonPropertyName("processCode")]
+        public string ProcessCode { get; set; } = string.Empty;
+
         [JsonPropertyName("activityId")]
         public string ActivityId { get; set; } = string.Empty;
 
         [JsonPropertyName("workItemOID")]
         public string WorkItemOID { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// BPM 簽核完成請求
+    /// </summary>
+    public class BpmWorkItemApprovalCompleteRequest
+    {
+        [JsonPropertyName("workItemOID")]
+        public string WorkItemOID { get; set; } = string.Empty;
+
+        [JsonPropertyName("userId")]
+        public string UserId { get; set; } = string.Empty;
+
+        [JsonPropertyName("comment")]
+        public string Comment { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// BPM 簽核完成回應
+    /// </summary>
+    public class BpmWorkItemApprovalCompleteResponse
+    {
+        [JsonPropertyName("status")]
+        public string Status { get; set; } = string.Empty;
+
+        [JsonPropertyName("message")]
+        public string Message { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// BPM sync-process-info 回應（用於審核流程）
+    /// </summary>
+    public class BpmSyncProcessInfoForApprovalResponse
+    {
+        [JsonPropertyName("status")]
+        public string Status { get; set; } = string.Empty;
+
+        [JsonPropertyName("message")]
+        public string Message { get; set; } = string.Empty;
+
+        [JsonPropertyName("processInfo")]
+        public BpmProcessInfoForApproval? ProcessInfo { get; set; }
+    }
+
+    /// <summary>
+    /// BPM 流程信息（用於審核流程）
+    /// </summary>
+    public class BpmProcessInfoForApproval
+    {
+        [JsonPropertyName("workItemOID")]
+        public string WorkItemOID { get; set; } = string.Empty;
+
+        [JsonPropertyName("requesterName")]
+        public string RequesterName { get; set; } = string.Empty;
+
+        [JsonPropertyName("requesterIdEmployeeId")]
+        public string RequesterIdEmployeeId { get; set; } = string.Empty;
     }
 
     #endregion

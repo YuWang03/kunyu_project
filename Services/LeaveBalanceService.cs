@@ -29,6 +29,8 @@ namespace HRSystemAPI.Services
         {
             try
             {
+                _logger.LogInformation($"開始查詢請假餘額 - 員工編號: {employeeNo}, 年度: {year}");
+
                 // 1. 取得員工基本資料和到職日
                 var employeeInfo = await GetEmployeeInfoAsync(employeeNo);
                 if (employeeInfo == null)
@@ -41,6 +43,8 @@ namespace HRSystemAPI.Services
                         Data = null
                     };
                 }
+
+                _logger.LogInformation($"成功取得員工資料: {employeeInfo.Value.EmployeeName}");
 
                 // 2. 計算周年制的起訖日期
                 var anniversaryPeriod = await GetAnniversaryPeriodAsync(employeeNo, year);
@@ -56,6 +60,7 @@ namespace HRSystemAPI.Services
                 }
 
                 var (startDate, endDate) = anniversaryPeriod.Value;
+                _logger.LogInformation($"周年制區間: {startDate:yyyy-MM-dd} 至 {endDate:yyyy-MM-dd}");
 
                 // 3. 查詢各類假別剩餘天數
                 var leaveDetails = await GetAllLeaveBalanceAsync(employeeNo, year, startDate, endDate);
@@ -142,6 +147,8 @@ namespace HRSystemAPI.Services
                 using var connection = new SqlConnection(_connectionString);
                 await connection.OpenAsync();
 
+                _logger.LogInformation($"開始查詢員工基本資料 - 員工編號: '{employeeNo}' (長度: {employeeNo.Length})");
+
                 var sql = @"
                     SELECT TOP 1 
                         EMPLOYEE_CNAME,
@@ -158,9 +165,35 @@ namespace HRSystemAPI.Services
                 {
                     var employeeName = reader["EMPLOYEE_CNAME"]?.ToString() ?? "";
                     var hireDate = reader["EMPLOYEE_HIRE_DATE"] as DateTime?;
+                    _logger.LogInformation($"找到員工資料: {employeeName}, 到職日: {hireDate}");
                     return (employeeName, hireDate);
                 }
 
+                _logger.LogWarning($"查詢員工基本資料未找到記錄 - EMPLOYEE_NO: {employeeNo}，嘗試替代查詢方式");
+
+                // 嘗試方式1: 用 TRIM 移除前後空格
+                var sqlTrim = @"
+                    SELECT TOP 1 
+                        EMPLOYEE_CNAME,
+                        EMPLOYEE_HIRE_DATE
+                    FROM [03546618].[dbo].[vwZZ_EMPLOYEE]
+                    WHERE LTRIM(RTRIM(EMPLOYEE_NO)) = @EmployeeNo
+                ";
+
+                command.CommandText = sqlTrim;
+                command.Parameters.Clear();
+                command.Parameters.Add("@EmployeeNo", SqlDbType.NVarChar).Value = employeeNo.Trim();
+
+                using var reader2 = await command.ExecuteReaderAsync();
+                if (await reader2.ReadAsync())
+                {
+                    var employeeName = reader2["EMPLOYEE_CNAME"]?.ToString() ?? "";
+                    var hireDate = reader2["EMPLOYEE_HIRE_DATE"] as DateTime?;
+                    _logger.LogInformation($"用 TRIM 方式查詢成功 - 員工名稱: {employeeName}, 到職日期: {hireDate}");
+                    return (employeeName, hireDate);
+                }
+
+                _logger.LogWarning($"所有查詢方式都未找到員工編號: {employeeNo}");
                 return null;
             }
             catch (Exception ex)
@@ -231,15 +264,15 @@ namespace HRSystemAPI.Services
 
                 using var command = new SqlCommand(sql, connection);
                 command.Parameters.Add("@EmployeeNo", SqlDbType.NVarChar).Value = employeeNo;
-                command.Parameters.Add("@Year", SqlDbType.NVarChar).Value = year.ToString();
+                command.Parameters.Add("@Year", SqlDbType.Int).Value = year;
 
                 using var reader = await command.ExecuteReaderAsync();
                 if (await reader.ReadAsync())
                 {
-                    // 從 decimal 讀取，避免精度問題
+                    // 特休：使用 EMPLOYEE_SPECIAL_VALUE (總共) 和 SPECIAL_REMAIN_HOURS (剩下)
                     decimal totalHours = Convert.ToDecimal(reader["EMPLOYEE_SPECIAL_VALUE"]);
                     decimal remainHours = Convert.ToDecimal(reader["SPECIAL_REMAIN_HOURS"]);
-                    decimal usedHours = totalHours - remainHours;
+                    decimal usedHours = totalHours - remainHours; // 已請 = 總共 - 剩下
                     decimal minUnit = Convert.ToDecimal(reader["LEAVE_MIN_VALUE"]);
 
                     // 如果總時數為 0，表示沒有特休資料
@@ -280,12 +313,104 @@ namespace HRSystemAPI.Services
 
             try
             {
-                // 定義假別清單和預設值
-                var leaveTypes = new Dictionary<string, (string code, decimal defaultTotal)>
+                // 1. 查詢補休假（從 vwZZ_EMPLOYEE_CHANGE_HOUR）
+                var compensatoryLeave = await GetCompensatoryLeaveAsync(connection, employeeNo, year: startDate.Year);
+                if (compensatoryLeave != null)
                 {
-                    { "事假", ("PERSONAL", 56) },      // 7天 = 56小時
-                    { "病假", ("SICK", 240) },         // 30天 = 240小時
-                    { "補休假", ("COMPENSATORY", 0) }  // 無固定額度
+                    leaveDetails.Add(compensatoryLeave);
+                }
+
+                // 2. 查詢事假和病假（從 vwZZ_ASK_LEAVE 加總 ASK_LEAVE_HOUR）
+                var personalAndSickLeaves = await GetPersonalAndSickLeavesAsync(connection, employeeNo, startDate, endDate);
+                leaveDetails.AddRange(personalAndSickLeaves);
+
+                return leaveDetails;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"查詢其他假別餘額失敗: {ex.Message}");
+                return leaveDetails;
+            }
+        }
+
+        /// <summary>
+        /// 查詢補休假餘額（從 vwZZ_EMPLOYEE_CHANGE_HOUR）
+        /// </summary>
+        private async Task<LeaveTypeDetail?> GetCompensatoryLeaveAsync(
+            SqlConnection connection,
+            string employeeNo,
+            int year)
+        {
+            try
+            {
+                var sql = @"
+                    SELECT TOP 1
+                        ISNULL(ch.CHANGE_HOURS, 0) as CHANGE_HOURS,
+                        ISNULL(ch.CHANGE_REMAIN_HOURS, 0) as CHANGE_REMAIN_HOURS,
+                        ISNULL(lr.LEAVE_MIN_VALUE, 1) as LEAVE_MIN_VALUE
+                    FROM [03546618].[dbo].[vwZZ_EMPLOYEE_CHANGE_HOUR] ch
+                    LEFT JOIN [03546618].[dbo].[vwZZ_LEAVE_REFERENCE] lr 
+                        ON lr.LEAVE_REFERENCE_CLASS = N'補休假'
+                    WHERE ch.EMPLOYEE_NO = @EmployeeNo COLLATE Chinese_Taiwan_Stroke_CI_AS
+                      AND ch.YEAR = @Year
+                ";
+
+                using var command = new SqlCommand(sql, connection);
+                command.Parameters.Add("@EmployeeNo", SqlDbType.NVarChar).Value = employeeNo;
+                command.Parameters.Add("@Year", SqlDbType.Int).Value = year;
+
+                using var reader = await command.ExecuteReaderAsync();
+                if (await reader.ReadAsync())
+                {
+                    // 補休：使用 CHANGE_HOURS (總共) 和 CHANGE_REMAIN_HOURS (剩下)
+                    decimal totalHours = Convert.ToDecimal(reader["CHANGE_HOURS"]);
+                    decimal remainHours = Convert.ToDecimal(reader["CHANGE_REMAIN_HOURS"]);
+                    decimal usedHours = totalHours - remainHours; // 已請 = 總共 - 剩下
+                    decimal minUnit = Convert.ToDecimal(reader["LEAVE_MIN_VALUE"]);
+
+                    // 如果總時數為 0，表示沒有補休資料
+                    if (totalHours == 0)
+                    {
+                        return null;
+                    }
+
+                    return CreateLeaveTypeDetail(
+                        leaveTypeName: "補休假",
+                        leaveTypeCode: "COMPENSATORY",
+                        minUnit: minUnit,
+                        totalHours: totalHours,
+                        remainHours: remainHours,
+                        usedHours: usedHours
+                    );
+                }
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"查詢補休假餘額失敗: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 查詢事假和病假餘額（從 vwZZ_ASK_LEAVE 加總 ASK_LEAVE_HOUR）
+        /// </summary>
+        private async Task<List<LeaveTypeDetail>> GetPersonalAndSickLeavesAsync(
+            SqlConnection connection,
+            string employeeNo,
+            DateTime startDate,
+            DateTime endDate)
+        {
+            var leaveDetails = new List<LeaveTypeDetail>();
+
+            try
+            {
+                // 定義事假和病假的全年度額度
+                var leaveTypes = new Dictionary<string, (string code, decimal annualTotal)>
+                {
+                    { "事假", ("PERSONAL", 112) },  // 全年度14天 = 112小時
+                    { "病假", ("SICK", 240) }       // 全年度30天 = 240小時
                 };
 
                 foreach (var leaveType in leaveTypes)
@@ -294,13 +419,12 @@ namespace HRSystemAPI.Services
                         SELECT 
                             lr.LEAVE_REFERENCE_CLASS,
                             ISNULL(lr.LEAVE_MIN_VALUE, 1) as LEAVE_MIN_VALUE,
-                            ISNULL(SUM(al.ASK_LEAVE_HOUR - ISNULL(al.CANCEL_HOUR, 0)), 0) as UsedHours
+                            ISNULL(SUM(al.ASK_LEAVE_HOUR), 0) as UsedHours
                         FROM [03546618].[dbo].[vwZZ_LEAVE_REFERENCE] lr
                         LEFT JOIN [03546618].[dbo].[vwZZ_ASK_LEAVE] al 
                             ON al.LEAVE_REFERENCE_CLASS = lr.LEAVE_REFERENCE_CLASS
                             AND al.EMPLOYEE_NO = @EmployeeNo COLLATE Chinese_Taiwan_Stroke_CI_AS
                             AND al.ASK_LEAVE_START BETWEEN @StartDate AND @EndDate
-                            AND al.IS_COUNT = 1
                         WHERE lr.LEAVE_REFERENCE_CLASS = @LeaveClass
                         GROUP BY lr.LEAVE_REFERENCE_CLASS, lr.LEAVE_MIN_VALUE
                     ";
@@ -315,21 +439,14 @@ namespace HRSystemAPI.Services
                     if (await reader.ReadAsync())
                     {
                         decimal minUnit = Convert.ToDecimal(reader["LEAVE_MIN_VALUE"]);
-                        decimal usedHours = Convert.ToDecimal(reader["UsedHours"]);
-                        decimal totalHours = leaveType.Value.defaultTotal;
+                        decimal usedHours = Convert.ToDecimal(reader["UsedHours"]); // 從 vwZZ_ASK_LEAVE 加總 ASK_LEAVE_HOUR
+                        decimal totalHours = leaveType.Value.annualTotal; // 全年度額度
                         decimal remainHours = totalHours - usedHours;
 
-                        // 病假特殊處理：顯示為30天固定額度
-                        if (leaveType.Key == "病假")
+                        // 如果超過全年度額度，剩餘顯示為 0
+                        if (remainHours < 0)
                         {
-                            totalHours = 240; // 30天 = 240小時
-                            remainHours = totalHours - usedHours;
-                        }
-
-                        // 補休假：如果沒有使用記錄且總時數為0，則不顯示
-                        if (leaveType.Key == "補休假" && usedHours == 0 && totalHours == 0)
-                        {
-                            continue;
+                            remainHours = 0;
                         }
 
                         var detail = CreateLeaveTypeDetail(
@@ -349,7 +466,7 @@ namespace HRSystemAPI.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"查詢其他假別餘額失敗: {ex.Message}");
+                _logger.LogError(ex, $"查詢事假/病假餘額失敗: {ex.Message}");
                 return leaveDetails;
             }
         }

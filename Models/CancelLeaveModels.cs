@@ -5,7 +5,37 @@ namespace HRSystemAPI.Models
     #region Request Models
 
     /// <summary>
-    /// 銷假申請列表請求 - efleaveget API
+    /// 單筆請假資料查詢請求 - efleaveget API
+    /// </summary>
+    public class CancelLeaveSingleRequest
+    {
+        /// <summary>
+        /// Token標記（必填）
+        /// </summary>
+        [Required(ErrorMessage = "tokenid 為必填")]
+        public string Tokenid { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 目前所屬公司（必填）
+        /// </summary>
+        [Required(ErrorMessage = "cid 為必填")]
+        public string Cid { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 使用者工號（必填）
+        /// </summary>
+        [Required(ErrorMessage = "uid 為必填")]
+        public string Uid { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 表單編號（必填）
+        /// </summary>
+        [Required(ErrorMessage = "formid 為必填")]
+        public string Formid { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// 銷假申請列表請求 - efleavelist API
     /// </summary>
     public class CancelLeaveListRequest
     {
@@ -129,12 +159,47 @@ namespace HRSystemAPI.Models
         public string Formid { get; set; } = string.Empty;
     }
 
+    /// <summary>
+    /// 銷假審核列表請求 - efotget API (主管審核下屬的請假申請)
+    /// </summary>
     #endregion
 
     #region Response Models
 
     /// <summary>
-    /// 銷假申請列表回應 - efleaveget API
+    /// 單筆請假資料查詢回應 - efleaveget API
+    /// </summary>
+    public class CancelLeaveSingleResponse
+    {
+        /// <summary>
+        /// 是否成功（200=成功, 203=失敗）
+        /// </summary>
+        public string Code { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 失敗訊息
+        /// </summary>
+        public string Msg { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 數據返回區（成功時有此區，失敗時無此區）
+        /// </summary>
+        public CancelLeaveSingleData? Data { get; set; }
+    }
+
+    /// <summary>
+    /// 單筆請假資料
+    /// </summary>
+    public class CancelLeaveSingleData
+    {
+        /// <summary>
+        /// 請假單資料
+        /// </summary>
+        public CancelLeaveItem? Efleveldata { get; set; }
+    }
+
+    /// <summary>
+    /// 銷假申請列表回應 - efleavelist API
     /// </summary>
     public class CancelLeaveListResponse
     {
@@ -224,6 +289,11 @@ namespace HRSystemAPI.Models
         /// 代理人工號
         /// </summary>
         public string Eagent { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 事件發生日期 (YYYY-MM-DD)
+        /// </summary>
+        public string Eleavedate { get; set; } = string.Empty;
 
         /// <summary>
         /// 附件檔案格式 (C: 請假附件檔)

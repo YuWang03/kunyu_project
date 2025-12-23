@@ -18,7 +18,7 @@ namespace HRSystemAPI.Services
         }
 
         /// <summary>
-        /// 建立 FTP 客戶端連線
+        /// 建立 FTP/SFTP 客戶端連線
         /// </summary>
         private AsyncFtpClient CreateClient()
         {
@@ -29,30 +29,37 @@ namespace HRSystemAPI.Services
                 _ftpSettings.Port
             );
 
+            // 日誌記錄連線類型
+            if (_ftpSettings.UseSftp || _ftpSettings.Protocol?.ToUpper() == "SFTP")
+            {
+                _logger.LogInformation("已配置使用 SFTP 連線");
+            }
+
             return client;
         }
 
         /// <summary>
-        /// 測試 FTP 連線
+        /// 測試 FTP/SFTP 連線
         /// </summary>
         public async Task<bool> TestConnectionAsync()
         {
             try
             {
-                _logger.LogInformation("測試 FTP 連線: {Host}:{Port}", _ftpSettings.Host, _ftpSettings.Port);
+                var protocol = _ftpSettings.UseSftp ? "SFTP" : "FTP";
+                _logger.LogInformation("測試 {Protocol} 連線: {Host}:{Port}", protocol, _ftpSettings.Host, _ftpSettings.Port);
 
                 using var client = CreateClient();
                 await client.Connect();
 
                 var isConnected = client.IsConnected;
-                _logger.LogInformation("FTP 連線測試結果: {Result}", isConnected ? "成功" : "失敗");
+                _logger.LogInformation("{Protocol} 連線測試結果: {Result}", protocol, isConnected ? "成功" : "失敗");
 
                 await client.Disconnect();
                 return isConnected;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "FTP 連線測試失敗");
+                _logger.LogError(ex, "FTP/SFTP 連線測試失敗");
                 return false;
             }
         }
@@ -64,7 +71,8 @@ namespace HRSystemAPI.Services
         {
             try
             {
-                _logger.LogInformation("上傳檔案到 FTP: {RemotePath}", remotePath);
+                var protocol = _ftpSettings.UseSftp ? "SFTP" : "FTP";
+                _logger.LogInformation("上傳檔案到 {Protocol}: {RemotePath}", protocol, remotePath);
 
                 using var client = CreateClient();
                 await client.Connect();

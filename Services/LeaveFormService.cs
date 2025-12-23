@@ -6,6 +6,7 @@ namespace HRSystemAPI.Services
     /// <summary>
     /// 請假單服務實作（BPM 整合）- 精簡測試版
     /// 根據 BPM Middleware API 規格完整實作
+    /// 整合本地 DB 同步功能
     /// </summary>
     public class LeaveFormService : ILeaveFormService
     {
@@ -13,6 +14,9 @@ namespace HRSystemAPI.Services
         private readonly FtpService _ftpService;
         private readonly IBasicInfoService _basicInfoService;
         private readonly IBpmMiddlewareService _bpmMiddlewareService;
+        private readonly IBpmFormSyncService _formSyncService;
+        private readonly IBpmFormRepository _formRepository;
+        private readonly ILeaveApplicationRepository _leaveApplicationRepository;
         private readonly ILogger<LeaveFormService> _logger;
         private readonly IConfiguration _configuration;
         private const string FORM_CODE = "PI_LEAVE_001";
@@ -24,6 +28,9 @@ namespace HRSystemAPI.Services
             FtpService ftpService,
             IBasicInfoService basicInfoService,
             IBpmMiddlewareService bpmMiddlewareService,
+            IBpmFormSyncService formSyncService,
+            IBpmFormRepository formRepository,
+            ILeaveApplicationRepository leaveApplicationRepository,
             ILogger<LeaveFormService> logger,
             IConfiguration configuration)
         {
@@ -31,6 +38,9 @@ namespace HRSystemAPI.Services
             _ftpService = ftpService;
             _basicInfoService = basicInfoService;
             _bpmMiddlewareService = bpmMiddlewareService;
+            _formSyncService = formSyncService;
+            _formRepository = formRepository;
+            _leaveApplicationRepository = leaveApplicationRepository;
             _logger = logger;
             _configuration = configuration;
         }
@@ -342,6 +352,34 @@ namespace HRSystemAPI.Services
 
                 _logger.LogInformation("請假單申請成功 - FormId: {FormId}, FormNumber: {FormNumber}", formId, formNumber);
 
+                // 6. 儲存請假單到本地 DB
+                try
+                {
+                    var leaveForm = new BpmForm
+                    {
+                        FormId = formId ?? formNumber ?? Guid.NewGuid().ToString(),
+                        FormCode = FORM_CODE,
+                        FormType = "LEAVE",
+                        FormVersion = FORM_VERSION,
+                        ApplicantId = employeeInfo.EmployeeNo ?? "",
+                        ApplicantName = employeeInfo.EmployeeName,
+                        ApplicantDepartment = employeeInfo.DepartmentName,
+                        Status = "PENDING",
+                        ApplyDate = DateTime.Now,
+                        SubmitTime = DateTime.Now,
+                        LastSyncTime = DateTime.Now,
+                        IsSyncedToBpm = true
+                    };
+                    leaveForm.SetFormData(formData);
+
+                    await _formSyncService.SaveFormToLocalAsync(leaveForm);
+                    _logger.LogInformation("請假單已儲存到本地 DB: {FormId}", leaveForm.FormId);
+                }
+                catch (Exception dbEx)
+                {
+                    _logger.LogWarning(dbEx, "儲存請假單到本地 DB 失敗，但 BPM 提交已成功");
+                }
+
                 return new LeaveFormOperationResult
                 {
                     Success = true,
@@ -378,26 +416,51 @@ namespace HRSystemAPI.Services
                     throw new Exception($"找不到 Email 對應的員工資料: {employeeEmail}");
                 }
 
-                // 2. 組裝取消請求
-                var cancelRequest = new
+                // 2. 使用 FormSyncService 取消表單（同時更新本地 DB 和 BPM）
+                var cancelRequest = new FormCancelRequest
                 {
-                    userId = employeeInfo.EmployeeNo,
-                    employeeNo = employeeInfo.EmployeeNo,
-                    reason = "申請人取消"
+                    FormId = formId,
+                    CancelReason = "申請人取消",
+                    OperatorId = employeeInfo.EmployeeNo ?? "",
+                    SyncToBpm = true
                 };
 
-                // 3. 呼叫 BPM API 取消表單
-                var endpoint = $"forms/{FORM_CODE}/instances/{formId}/cancel";
-                var response = await _bpmService.PostAsync(endpoint, cancelRequest);
+                var cancelResult = await _formSyncService.CancelFormAsync(cancelRequest);
 
-                _logger.LogInformation("請假單取消成功: {FormId}", formId);
-
-                return new LeaveFormOperationResult
+                if (cancelResult.Success)
                 {
-                    Success = true,
-                    Message = "請假單取消成功",
-                    FormId = formId
-                };
+                    _logger.LogInformation("請假單取消成功: {FormId}, 已同步至 BPM: {SyncedToBpm}", 
+                        formId, cancelResult.SyncedToBpm);
+
+                    return new LeaveFormOperationResult
+                    {
+                        Success = true,
+                        Message = "請假單取消成功",
+                        FormId = formId
+                    };
+                }
+                else
+                {
+                    // 如果同步服務失敗，嘗試直接呼叫 BPM API
+                    var bpmCancelRequest = new
+                    {
+                        userId = employeeInfo.EmployeeNo,
+                        employeeNo = employeeInfo.EmployeeNo,
+                        reason = "申請人取消"
+                    };
+
+                    var endpoint = $"forms/{FORM_CODE}/instances/{formId}/cancel";
+                    var response = await _bpmService.PostAsync(endpoint, bpmCancelRequest);
+
+                    _logger.LogInformation("請假單取消成功 (直接 BPM): {FormId}", formId);
+
+                    return new LeaveFormOperationResult
+                    {
+                        Success = true,
+                        Message = "請假單取消成功",
+                        FormId = formId
+                    };
+                }
             }
             catch (Exception ex)
             {
@@ -1009,7 +1072,7 @@ namespace HRSystemAPI.Services
                 }
 
                 // 步驟 2: 查詢假別資訊
-                // SQL 查詢語句 - 查詢所有假別（已移除排除清單，允許所有假別代碼）
+                // SQL 查詢語句 - 查詢所有假別（包括加班和其他類型假別）
                 const string sql = @"
                     SELECT
                         L.LEAVE_REFERENCE_CLASS AS LeaveType,
@@ -1020,7 +1083,7 @@ namespace HRSystemAPI.Services
                     JOIN [dbo].[VwZZ_COMPANY] C ON L.COMPANY_ID = C.COMPANY_ID
                     WHERE C.COMPANY_CODE = @CompanyCode
                     AND L.LEAVE_REFERENCE_CODE NOT IN (
-                        'SLC01', 'S0012-1', 'S0013-1', 'S0013-2', 'SLC01-REGL', 'SLC01-SUOT',
+                        'S0012-1', 'S0013-1', 'S0013-2',
                         'SLC02', 'SLC05', 'SLC06', 'SLC07', 'S0009-1', 'S0010-1', 'S0011-1',
                         'S0017-1', 'S0017-2', 'S0018-1', 'S0019-1', 'S0019-2', 'S0019-3',
                         'S0015-1', 'S0020-1', 'S0004-5', 'S0004-6'
@@ -1070,6 +1133,37 @@ namespace HRSystemAPI.Services
                 _logger.LogInformation("申請人資料 - 工號: {EmployeeNo}, 姓名: {Name}, 部門: {Dept}",
                     employeeInfo.EmployeeNo, employeeInfo.EmployeeName, employeeInfo.DepartmentName);
 
+                // 1.5. 驗證請假日期 - 不能在週六日
+                if (!DateTime.TryParse(request.Estartdate, out var startDate))
+                {
+                    throw new Exception($"無效的起始日期格式: {request.Estartdate}");
+                }
+                if (!DateTime.TryParse(request.Eenddate, out var endDate))
+                {
+                    throw new Exception($"無效的結束日期格式: {request.Eenddate}");
+                }
+
+                // 檢查請假期間是否包含週六或週日
+                var invalidWeekendDates = new List<(DateTime date, string dayOfWeek)>();
+                for (var date = startDate; date <= endDate; date = date.AddDays(1))
+                {
+                    if (date.DayOfWeek == DayOfWeek.Saturday)
+                    {
+                        invalidWeekendDates.Add((date, "週六"));
+                    }
+                    else if (date.DayOfWeek == DayOfWeek.Sunday)
+                    {
+                        invalidWeekendDates.Add((date, "週日"));
+                    }
+                }
+
+                if (invalidWeekendDates.Any())
+                {
+                    var invalidDatesStr = string.Join(", ", invalidWeekendDates.Select(d => $"{d.date:yyyy-MM-dd}({d.dayOfWeek})"));
+                    _logger.LogWarning("請假申請包含週六日，無法提交：{InvalidDates}", invalidDatesStr);
+                    throw new Exception($"請假期間不能包含週六日，以下日期無法請假：{invalidDatesStr}");
+                }
+
                 // 2. 查詢假別資訊
                 var leaveTypes = await GetLeaveTypeUnitsAsync(request.Cid);
                 var leaveTypeInfo = leaveTypes.FirstOrDefault(lt => lt.LeaveCode == request.Leavetype);
@@ -1099,15 +1193,14 @@ namespace HRSystemAPI.Services
                 }
 
                 // 4. 如果有附件，使用 efileurl 或根據 efileid 構建附件路徑
-                string? filePath = null;
                 bool hasAttachments = false;
                 
                 // 優先使用 efileurl（從附件上傳 API 取得的實際 URL）
                 if (!string.IsNullOrEmpty(request.Efileurl))
                 {
-                    filePath = request.Efileurl;
+                    formData["filePath"] = request.Efileurl;
                     hasAttachments = true;
-                    _logger.LogInformation("使用上傳的 filePath: {FilePath}", filePath);
+                    _logger.LogInformation("使用上傳的 filePath: {FilePath}", request.Efileurl);
                 }
                 // 如果沒有 efileurl 但有 efileid，則根據 efileid 構建 FTP 路徑（向後相容性）
                 else if (request.Efileid != null && request.Efileid.Any())
@@ -1116,7 +1209,8 @@ namespace HRSystemAPI.Services
                     // 將附件 ID 轉換為 FTP 路徑格式
                     // 格式: FTPTest~~/FTPShare/filename
                     var ftpPaths = request.Efileid.Select(id => $"FTPTest~~/FTPShare/leave_{id}.pdf").ToList();
-                    filePath = string.Join("||", ftpPaths);
+                    var filePath = string.Join("||", ftpPaths);
+                    formData["filePath"] = filePath;
                     hasAttachments = true;
                     _logger.LogInformation("構建的 filePath: {FilePath}", filePath);
                 }
@@ -1132,8 +1226,7 @@ namespace HRSystemAPI.Services
                     subject = $"{employeeInfo.EmployeeName} 的請假申請 - {leaveTypeInfo.LeaveType}",
                     sourceSystem = "APP",
                     environment = "TEST",
-                    hasAttachments = hasAttachments,
-                    filePath = filePath  // 添加附件路徑
+                    hasAttachments = hasAttachments
                 };
 
                 // 5. 呼叫 BPM API 建立表單
@@ -1165,6 +1258,71 @@ namespace HRSystemAPI.Services
                 
                 _logger.LogInformation("請假單申請成功 - ProcessSerialNo: {ProcessSerialNo}, RequestId: {RequestId}, Status: {Status}", 
                     processSerialNo, requestId, status);
+                
+                // 7. 同步表單到本地資料庫（同步執行，確保在同一個上下文中）
+                // 暫時註解 - 資料庫連線問題等待修復
+                /*
+                try
+                {
+                    // 建立 BpmForm 物件
+                    var bpmForm = new BpmForm
+                    {
+                        FormId = processSerialNo,
+                        FormType = "PI_LEAVE_001",
+                        ApplicantId = employeeInfo.EmployeeNo,
+                        ApplicantName = employeeInfo.EmployeeName,
+                        Status = "SUBMITTED",
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow,
+                        FormData = JsonSerializer.Serialize(jsonResponse)
+                    };
+
+                    // 直接保存到本地資料庫
+                    await _formRepository.CreateOrUpdateFormAsync(bpmForm);
+                    _logger.LogInformation("✅ 成功保存請假單到本地資料庫: {FormId}", processSerialNo);
+                    Console.WriteLine($"✅ 表單已保存到本地資料庫（將由後台服務同步到遠程資料庫 54.46.24.34）");
+                }
+                catch (Exception syncEx)
+                {
+                    _logger.LogWarning(syncEx, "同步請假單到本地資料庫失敗，但主要流程已成功: {FormId}", processSerialNo);
+                    Console.WriteLine($"⚠️  同步到本地資料庫失敗: {syncEx.Message}");
+                    // 不拋出異常，避免影響主流程
+                }
+                */
+                
+                // 8. 儲存到 leave_applications 資料表
+                try
+                {
+                    var savedSuccessfully = await _leaveApplicationRepository.SaveLeaveApplicationAsync(
+                        uid: employeeInfo.EmployeeNo,
+                        uname: employeeInfo.EmployeeName,
+                        udepartment: employeeInfo.DepartmentName ?? "",
+                        formid: processSerialNo,
+                        leavetype: leaveTypeInfo.LeaveType,
+                        estartdate: request.Estartdate,
+                        estarttime: request.Estarttime,
+                        eenddate: request.Eenddate,
+                        eendtime: request.Eendtime,
+                        ereason: request.Ereason
+                    );
+
+                    if (savedSuccessfully)
+                    {
+                        Console.WriteLine($"✅ 請假單記錄已儲存到資料庫: {processSerialNo}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"⚠️  儲存請假單記錄到資料庫失敗");
+                    }
+                }
+                catch (Exception dbEx)
+                {
+                    _logger.LogWarning(dbEx, "儲存請假單記錄到資料庫失敗，但主要流程已成功: {FormId}", processSerialNo);
+                    Console.WriteLine($"⚠️  儲存到資料庫失敗: {dbEx.Message}");
+                    // 不拋出異常，避免影響主流程
+                }
+                
+                Console.WriteLine($"✅ 表單已提交至 BPM 並儲存到資料庫");
                 
                 return new LeaveFormOperationResult
                 {

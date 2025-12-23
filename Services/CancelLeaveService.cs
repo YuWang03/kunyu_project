@@ -13,6 +13,7 @@ namespace HRSystemAPI.Services
     {
         private readonly BpmService _bpmService;
         private readonly IBasicInfoService _basicInfoService;
+        private readonly ILeaveApplicationRepository _leaveApplicationRepository;
         private readonly ILogger<CancelLeaveService> _logger;
         private readonly IConfiguration _configuration;
         private readonly string _hrDatabaseConnectionString;
@@ -26,11 +27,13 @@ namespace HRSystemAPI.Services
         public CancelLeaveService(
             BpmService bpmService,
             IBasicInfoService basicInfoService,
+            ILeaveApplicationRepository leaveApplicationRepository,
             ILogger<CancelLeaveService> logger,
             IConfiguration configuration)
         {
             _bpmService = bpmService;
             _basicInfoService = basicInfoService;
+            _leaveApplicationRepository = leaveApplicationRepository;
             _logger = logger;
             _configuration = configuration;
             _hrDatabaseConnectionString = configuration.GetConnectionString("HRDatabase")
@@ -43,7 +46,8 @@ namespace HRSystemAPI.Services
 
         /// <summary>
         /// 查詢可銷假的請假單列表
-        /// 返回起始日未到的個人請假表單，並驗證 104 DB 的簽核狀態
+        /// 返回使用者自己提交的請假表單（用於銷假申請）
+        /// 如果提供 formid，則只查詢該單筆資料
         /// </summary>
         public async Task<CancelLeaveListResponse> GetCancelLeaveListAsync(CancelLeaveListRequest request)
         {
@@ -63,167 +67,40 @@ namespace HRSystemAPI.Services
                     };
                 }
 
-                // 2. 查詢該員工的請假單記錄（透過 BPM API）
-                var today = DateTime.Now.Date;
-
-                var queryEndpoint = $"bpm/process-instances?processCode={LEAVE_FORM_CODE}_PROCESS&userId={request.Uid}&status=ACTIVE";
-
-                string responseBody;
-                try
+                // 2. 如果提供了 formid，則直接查詢該單筆資料並返回列表
+                if (!string.IsNullOrEmpty(request.Formid))
                 {
-                    responseBody = await _bpmService.GetAsync(queryEndpoint);
-                    Console.WriteLine($"====== BPM 查詢請假單回應 ======");
-                    Console.WriteLine($"查詢端點: {queryEndpoint}");
-                    Console.WriteLine($"回應內容: {responseBody}");
-                    Console.WriteLine($"================================");
-                    _logger.LogDebug("BPM 查詢回應: {Response}", responseBody);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"❌ 查詢 BPM 失敗: {ex.Message}");
-                    _logger.LogError(ex, "查詢 BPM 請假單記錄失敗");
+                    Console.WriteLine($"====== 查詢單筆請假單（從資料庫）: {request.Formid} ======");
+                    var singleItem = await _leaveApplicationRepository.GetLeaveApplicationByFormIdAsync(request.Formid, request.Uid);
                     
-                    return new CancelLeaveListResponse
+                    if (singleItem != null)
                     {
-                        Code = "200",
-                        Msg = "請求成功",
-                        Data = new CancelLeaveListData
+                        return new CancelLeaveListResponse
                         {
-                            Efleveldata = new List<CancelLeaveItem>()
-                        }
-                    };
-                }
-
-                // 3. 解析 BPM 回應
-                var bpmResponse = JsonSerializer.Deserialize<JsonElement>(responseBody);
-                Console.WriteLine($"JSON 解析成功，根屬性: {string.Join(", ", bpmResponse.EnumerateObject().Select(p => p.Name))}");
-                
-                if (!bpmResponse.TryGetProperty("processInstances", out var processInstancesElement) &&
-                    !bpmResponse.TryGetProperty("data", out processInstancesElement))
-                {
-                    Console.WriteLine($"⚠️ BPM 回應中未找到 processInstances 或 data 屬性");
-                    _logger.LogWarning("BPM API 回應中沒有找到表單列表");
-                    
-                    return new CancelLeaveListResponse
-                    {
-                        Code = "200",
-                        Msg = "請求成功",
-                        Data = new CancelLeaveListData
-                        {
-                            Efleveldata = new List<CancelLeaveItem>()
-                        }
-                    };
-                }
-                
-                Console.WriteLine($"✅ 找到資料陣列，項目數: {processInstancesElement.GetArrayLength()}");
-
-                // 4. 轉換為 APP 格式，並驗證 104 DB 簽核狀態
-                var cancelLeaveItems = new List<CancelLeaveItem>();
-
-                // 遍歷流程實例
-                foreach (var processInstance in processInstancesElement.EnumerateArray())
-                {
-                    try
-                    {
-                        // 取得流程序號
-                        var processSerialNo = GetStringValue(processInstance, "processSerialNo", "serialNumber", "formId");
-                        
-                        // 如果指定了 Formid，則只處理該表單
-                        if (!string.IsNullOrEmpty(request.Formid) && processSerialNo != request.Formid)
-                        {
-                            continue;
-                        }
-
-                        // 取得表單資料
-                        if (processInstance.TryGetProperty("formData", out var formDataProp) &&
-                            formDataProp.TryGetProperty(LEAVE_FORM_CODE, out var leaveFormData))
-                        {
-                            var startDate = GetStringValue(leaveFormData, "startDate");
-                            var startTime = GetStringValue(leaveFormData, "startTime");
-                            var endDate = GetStringValue(leaveFormData, "endDate");
-                            var endTime = GetStringValue(leaveFormData, "endTime");
-                            var leaveTypeName = GetStringValue(leaveFormData, "leaveTypeName");
-                            var leaveTypeCode = GetStringValue(leaveFormData, "leaveTypeId", "leaveType");
-                            var reason = GetStringValue(leaveFormData, "reason");
-                            var agentNo = GetStringValue(leaveFormData, "agentNo", "agentId");
-
-                            // 解析附件
-                            var attachmentsList = new List<CancelLeaveAttachment>();
-                            if (leaveFormData.TryGetProperty("attachments", out var attachmentsElement) &&
-                                attachmentsElement.ValueKind == JsonValueKind.Array)
+                            Code = "200",
+                            Msg = "請求成功",
+                            Data = new CancelLeaveListData
                             {
-                                int fileId = 1;
-                                foreach (var attachment in attachmentsElement.EnumerateArray())
-                                {
-                                    var cancelAttachment = new CancelLeaveAttachment
-                                    {
-                                        Efileid = fileId.ToString()
-                                    };
-
-                                    if (attachment.TryGetProperty("fileName", out var fileNameElement))
-                                        cancelAttachment.Efilename = fileNameElement.GetString() ?? "";
-
-                                    if (attachment.TryGetProperty("originalFileName", out var originalFileNameElement))
-                                        cancelAttachment.Esfilename = originalFileNameElement.GetString() ?? "";
-
-                                    if (attachment.TryGetProperty("fileUrl", out var fileUrlElement))
-                                        cancelAttachment.Efileurl = fileUrlElement.GetString() ?? "";
-
-                                    attachmentsList.Add(cancelAttachment);
-                                    fileId++;
-                                }
+                                Efleveldata = new List<CancelLeaveItem> { singleItem }
                             }
-                            
-                            // 檢查起始日期是否未到（>= 今天）
-                            if (DateTime.TryParse(startDate.Replace("/", "-"), out var startDateTime) && 
-                                startDateTime.Date >= today)
-                            {
-                                // ✅ 檢查 104 DB 的簽核狀態
-                                bool isApproved = await CheckLeaveApprovalStatusInDb(
-                                    request.Uid, 
-                                    leaveTypeCode, 
-                                    startDateTime.Date,
-                                    DateTime.TryParse(endDate.Replace("/", "-"), out var endDateTime) ? endDateTime.Date : startDateTime.Date
-                                );
-
-                                // 只有已簽核完畢 (InsertFlag = 1) 的才加入列表
-                                if (isApproved)
-                                {
-                                    var item = new CancelLeaveItem
-                                    {
-                                        Uid = request.Uid,
-                                        Uname = employeeInfo.EmployeeName ?? "",
-                                        Udepartment = employeeInfo.DepartmentName ?? "",
-                                        Formid = processSerialNo,
-                                        Leavetype = leaveTypeName,
-                                        Estartdate = startDate.Replace("/", "-"),
-                                        Estarttime = startTime,
-                                        Eenddate = endDate.Replace("/", "-"),
-                                        Eendtime = endTime,
-                                        Ereason = reason,
-                                        Eagent = agentNo,
-                                        Efiletype = "C",
-                                        Attachments = attachmentsList
-                                    };
-                                    
-                                    cancelLeaveItems.Add(item);
-                                    _logger.LogInformation("找到可銷假的請假單: {FormId}, {LeaveType}, {StartDate}，簽核狀態已確認", 
-                                        processSerialNo, leaveTypeName, startDate);
-                                }
-                                else
-                                {
-                                    _logger.LogInformation("請假單 {FormId} 尚未簽核完成，略過", processSerialNo);
-                                }
-                            }
-                        }
+                        };
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        _logger.LogWarning(ex, "轉換請假單資料失敗，跳過此筆記錄");
+                        return new CancelLeaveListResponse
+                        {
+                            Code = "203",
+                            Msg = "查無資料"
+                        };
                     }
                 }
 
-                _logger.LogInformation("查詢到 {Count} 筆可銷假的請假單", cancelLeaveItems.Count);
+                // 3. 從資料庫查詢使用者的請假單列表（起始日未到）
+                Console.WriteLine($"====== 開始查詢使用者 {request.Uid} 的請假單（從資料庫） ======");
+                var leaveList = await _leaveApplicationRepository.GetUserLeaveApplicationsAsync(request.Uid);
+
+                Console.WriteLine($"====== 查詢完成，共找到 {leaveList.Count} 筆可銷假的請假單 ======");
+                _logger.LogInformation("查詢完成，共找到 {Count} 筆可銷假的請假單", leaveList.Count);
 
                 return new CancelLeaveListResponse
                 {
@@ -231,7 +108,7 @@ namespace HRSystemAPI.Services
                     Msg = "請求成功",
                     Data = new CancelLeaveListData
                     {
-                        Efleveldata = cancelLeaveItems
+                        Efleveldata = leaveList
                     }
                 };
             }
@@ -246,57 +123,249 @@ namespace HRSystemAPI.Services
             }
         }
 
+        #endregion
+
+        #region 查詢單筆請假資料
+
         /// <summary>
-        /// 檢查 104 DB 中的請假申請簽核狀態
-        /// 返回 true 表示已簽核完畢 (InsertFlag = 1)
+        /// 查詢單筆請假資料（根據 formid）
         /// </summary>
-        private async Task<bool> CheckLeaveApprovalStatusInDb(string employeeNo, string leaveType, DateTime startDate, DateTime endDate)
+        public async Task<CancelLeaveSingleResponse> GetCancelLeaveSingleAsync(CancelLeaveSingleRequest request)
         {
             try
             {
-                // 如果未配置 104 DB 連接，預設返回 true（允許銷假）
-                if (string.IsNullOrEmpty(_hrDatabase104ConnectionString) || 
-                    _hrDatabase104ConnectionString == _hrDatabaseConnectionString)
+                _logger.LogInformation("開始查詢單筆請假資料，表單編號: {FormId}", request.Formid);
+
+                // 1. 查詢員工基本資訊
+                var employeeInfo = await _basicInfoService.GetEmployeeByIdAsync(request.Uid);
+                if (employeeInfo == null)
                 {
-                    _logger.LogWarning("104 DB 未配置，使用預設簽核狀態（允許）");
-                    return true;
-                }
-
-                using (var connection = new SqlConnection(_hrDatabase104ConnectionString))
-                {
-                    await connection.OpenAsync();
-
-                    // 查詢 vwZZ_ASK_LEAVE_STATUS 視圖
-                    var query = @"
-                        SELECT TOP 1 InsertFlag 
-                        FROM vwZZ_ASK_LEAVE_STATUS
-                        WHERE EmployeeNo = @EmployeeNo 
-                          AND LeaveType = @LeaveType
-                          AND StartDate = @StartDate
-                          AND EndDate = @EndDate
-                        ORDER BY CreateDate DESC";
-
-                    var result = await connection.QueryFirstOrDefaultAsync<int?>(query, new
+                    _logger.LogWarning("找不到員工資訊: {Uid}", request.Uid);
+                    return new CancelLeaveSingleResponse
                     {
-                        EmployeeNo = employeeNo,
-                        LeaveType = leaveType,
-                        StartDate = startDate,
-                        EndDate = endDate
-                    });
-
-                    bool isApproved = result == 1; // InsertFlag = 1 表示已簽核完畢
-
-                    _logger.LogInformation("104 DB 簽核狀態檢查 - 員工: {EmployeeNo}, 假別: {LeaveType}, 日期: {StartDate}, 簽核完畢: {IsApproved}",
-                        employeeNo, leaveType, startDate.ToString("yyyy-MM-dd"), isApproved);
-
-                    return isApproved;
+                        Code = "203",
+                        Msg = "找不到員工資訊"
+                    };
                 }
+
+                // 2. 透過 BPM API 查詢表單資料
+                var syncProcessEndpoint = $"bpm/sync-process-info?processSerialNo={request.Formid}&processCode=PI_LEAVE_001_PROCESS&environment=TEST";
+                _logger.LogInformation("查詢表單詳細資訊: {Endpoint}", syncProcessEndpoint);
+                
+                string syncProcessResponse;
+                try
+                {
+                    syncProcessResponse = await _bpmService.GetAsync(syncProcessEndpoint);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "查詢 BPM 表單資料失敗 - FormId: {FormId}", request.Formid);
+                    return new CancelLeaveSingleResponse
+                    {
+                        Code = "203",
+                        Msg = "查詢表單資料失敗"
+                    };
+                }
+
+                var syncProcessJson = JsonSerializer.Deserialize<JsonElement>(syncProcessResponse);
+                _logger.LogInformation("BPM API 回應: {Response}", syncProcessResponse);
+
+                // 檢查 API 回應狀態
+                if (!syncProcessJson.TryGetProperty("status", out var statusElement) || 
+                    statusElement.GetString() != "SUCCESS")
+                {
+                    var actualStatus = syncProcessJson.TryGetProperty("status", out var status) ? status.GetString() : "N/A";
+                    _logger.LogWarning("BPM API 回應狀態異常 - FormId: {FormId}, 狀態: {Status}", request.Formid, actualStatus);
+                    return new CancelLeaveSingleResponse
+                    {
+                        Code = "203",
+                        Msg = "查無資料"
+                    };
+                }
+
+                // 3. 解析表單資料
+                if (!syncProcessJson.TryGetProperty("formInfo", out var formInfo) ||
+                    !formInfo.TryGetProperty("PI_LEAVE_001", out var leaveFormData))
+                {
+                    _logger.LogWarning("表單資料格式異常 - FormId: {FormId}", request.Formid);
+                    return new CancelLeaveSingleResponse
+                    {
+                        Code = "203",
+                        Msg = "表單資料格式異常"
+                    };
+                }
+
+                // 解析必要欄位
+                var leaveTypeName = leaveFormData.TryGetProperty("leaveType_name", out var ltName) ? ltName.GetString() : "";
+                var startDate = leaveFormData.TryGetProperty("startDate", out var sd) ? sd.GetString() : "";
+                var startTime = leaveFormData.TryGetProperty("startTime", out var st) ? st.GetString() : "";
+                var endDate = leaveFormData.TryGetProperty("endDate", out var ed) ? ed.GetString() : "";
+                var endTime = leaveFormData.TryGetProperty("endTime", out var et) ? et.GetString() : "";
+                var reason = leaveFormData.TryGetProperty("reason", out var r) ? r.GetString() : "";
+                var agentId = leaveFormData.TryGetProperty("agentId", out var ai) ? ai.GetString() : "";
+                var agentNo = leaveFormData.TryGetProperty("agentNo", out var an) ? an.GetString() : "";
+                var eventDate = leaveFormData.TryGetProperty("eventDate", out var ed2) ? ed2.GetString() : "";
+
+                // 使用 agentId，如果沒有則使用 agentNo
+                var agent = !string.IsNullOrEmpty(agentId) ? agentId : agentNo;
+
+                // 解析申請人資訊
+                var requesterIdEmployeeId = leaveFormData.TryGetProperty("requesterId_employeeId", out var reqEmpId) ? reqEmpId.GetString() : "";
+                var requesterName = leaveFormData.TryGetProperty("requesterId_name", out var reqName) ? reqName.GetString() : "";
+                var orgName = leaveFormData.TryGetProperty("requesterId_orgName", out var orgN) ? orgN.GetString() : "";
+
+                // 如果有 applierId，優先使用
+                var applierIdEmployeeId = leaveFormData.TryGetProperty("applierId_employeeId", out var applierIdEl)
+                    ? applierIdEl.GetString() 
+                    : requesterIdEmployeeId;
+                var applierName = leaveFormData.TryGetProperty("applierId_name", out var applierNameEl)
+                    ? applierNameEl.GetString()
+                    : requesterName;
+
+                // 格式化日期
+                var formattedStartDate = startDate?.Replace("/", "-") ?? "";
+                var formattedEndDate = endDate?.Replace("/", "-") ?? "";
+                var formattedEventDate = eventDate?.Replace("/", "-") ?? "";
+
+                // 如果從 BPM 取不到申請人資訊，使用 request.Uid 對應的員工資訊
+                if (string.IsNullOrEmpty(applierIdEmployeeId))
+                {
+                    applierIdEmployeeId = request.Uid ?? "";
+                    _logger.LogWarning("從 BPM 無法取得申請人工號，使用 request.Uid: {Uid}", request.Uid);
+                }
+
+                if (string.IsNullOrEmpty(applierName))
+                {
+                    applierName = employeeInfo?.EmployeeName ?? "";
+                    _logger.LogWarning("從 BPM 無法取得申請人姓名，使用員工基本資訊: {Name}", employeeInfo?.EmployeeName);
+                }
+
+                if (string.IsNullOrEmpty(orgName))
+                {
+                    orgName = employeeInfo?.DepartmentName ?? "";
+                    _logger.LogWarning("從 BPM 無法取得申請人單位，使用員工基本資訊: {Department}", employeeInfo?.DepartmentName);
+                }
+
+                // 建立回應資料
+                var item = new CancelLeaveItem
+                {
+                    Uid = applierIdEmployeeId ?? "",
+                    Uname = applierName ?? "",
+                    Udepartment = orgName ?? "",
+                    Formid = request.Formid,
+                    Leavetype = leaveTypeName ?? "",
+                    Estartdate = formattedStartDate,
+                    Estarttime = startTime ?? "",
+                    Eenddate = formattedEndDate,
+                    Eendtime = endTime ?? "",
+                    Ereason = reason ?? "",
+                    Eagent = agent ?? "",
+                    Eleavedate = formattedEventDate
+                };
+
+                _logger.LogInformation("成功查詢單筆請假資料 - FormId: {FormId}, 申請人: {Name} ({Uid})", request.Formid, applierName, applierIdEmployeeId);
+
+                return new CancelLeaveSingleResponse
+                {
+                    Code = "200",
+                    Msg = "請求成功",
+                    Data = new CancelLeaveSingleData
+                    {
+                        Efleveldata = item
+                    }
+                };
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "查詢 104 DB 簽核狀態失敗，使用預設狀態（允許）");
-                // 如果查詢失敗，預設允許銷假
-                return true;
+                _logger.LogError(ex, "查詢單筆請假資料時發生錯誤 - FormId: {FormId}", request.Formid);
+                return new CancelLeaveSingleResponse
+                {
+                    Code = "203",
+                    Msg = "請求失敗，主要條件不符合"
+                };
+            }
+        }
+
+        /// <summary>
+        /// 查詢單筆請假資料的輔助方法（用於列表查詢）
+        /// </summary>
+        private async Task<CancelLeaveItem?> GetSingleLeaveItemAsync(string formId, string uid)
+        {
+            try
+            {
+                Console.WriteLine($"  查詢表單: {formId}");
+                
+                var syncProcessEndpoint = $"bpm/sync-process-info?processSerialNo={formId}&processCode=PI_LEAVE_001_PROCESS&environment=TEST";
+                var syncProcessResponse = await _bpmService.GetAsync(syncProcessEndpoint);
+                var syncProcessJson = JsonSerializer.Deserialize<JsonElement>(syncProcessResponse);
+                
+                if (!syncProcessJson.TryGetProperty("status", out var syncStatus) || 
+                    syncStatus.GetString() != "SUCCESS")
+                {
+                    Console.WriteLine($"  ❌ 取得表單詳細資訊失敗");
+                    return null;
+                }
+
+                if (!syncProcessJson.TryGetProperty("formInfo", out var formInfo) ||
+                    !formInfo.TryGetProperty("PI_LEAVE_001", out var leaveForm))
+                {
+                    Console.WriteLine($"  ⚠️ 找不到 formInfo.PI_LEAVE_001 欄位");
+                    return null;
+                }
+
+                // 解析申請人資訊
+                var requesterIdEmployeeId = leaveForm.TryGetProperty("requesterId_employeeId", out var reqEmpId) ? reqEmpId.GetString() : "";
+                var requesterName = leaveForm.TryGetProperty("requesterId_name", out var reqName) ? reqName.GetString() : "";
+                var orgName = leaveForm.TryGetProperty("requesterId_orgName", out var orgN) ? orgN.GetString() : "";
+
+                // 如果有 applierId，優先使用
+                var applierIdEmployeeId = leaveForm.TryGetProperty("applierId_employeeId", out var applierIdEl)
+                    ? applierIdEl.GetString() 
+                    : requesterIdEmployeeId;
+                var applierName = leaveForm.TryGetProperty("applierId_name", out var applierNameEl)
+                    ? applierNameEl.GetString()
+                    : requesterName;
+                
+                // 驗證是否為該使用者的表單
+                if (applierIdEmployeeId != uid)
+                {
+                    Console.WriteLine($"  ⚠️ 表單不屬於使用者 {uid}，實際申請人: {applierIdEmployeeId}");
+                    return null;
+                }
+
+                // 解析請假單資料
+                var leaveTypeName = leaveForm.TryGetProperty("leaveType_name", out var ltName) ? ltName.GetString() : "";
+                var startDate = leaveForm.TryGetProperty("startDate", out var sd) ? sd.GetString() : "";
+                var startTime = leaveForm.TryGetProperty("startTime", out var st) ? st.GetString() : "";
+                var endDate = leaveForm.TryGetProperty("endDate", out var ed) ? ed.GetString() : "";
+                var endTime = leaveForm.TryGetProperty("endTime", out var et) ? et.GetString() : "";
+                var reason = leaveForm.TryGetProperty("reason", out var r) ? r.GetString() : "";
+                
+                var formattedStartDate = startDate?.Replace("/", "-") ?? "";
+                var formattedEndDate = endDate?.Replace("/", "-") ?? "";
+                
+                var item = new CancelLeaveItem
+                {
+                    Uid = applierIdEmployeeId ?? "",
+                    Uname = applierName ?? "",
+                    Udepartment = orgName ?? "",
+                    Formid = formId,
+                    Leavetype = leaveTypeName ?? "",
+                    Estartdate = formattedStartDate,
+                    Estarttime = startTime ?? "",
+                    Eenddate = formattedEndDate,
+                    Eendtime = endTime ?? "",
+                    Ereason = reason ?? ""
+                };
+                
+                Console.WriteLine($"  ✅ 成功取得請假單: {formId}, 申請人: {applierName} ({applierIdEmployeeId})");
+                return item;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  ❌ 查詢表單詳細資訊時發生錯誤: {ex.Message}");
+                _logger.LogError(ex, "查詢表單詳細資訊時發生錯誤 - FormId: {FormId}", formId);
+                return null;
             }
         }
 
@@ -580,157 +649,17 @@ namespace HRSystemAPI.Services
                 _logger.LogInformation("申請人資料 - 工號: {EmployeeNo}, 姓名: {Name}, 部門: {Dept}",
                     employeeInfo.EmployeeNo, employeeInfo.EmployeeName, employeeInfo.DepartmentName);
 
-                // 2. 查詢原請假單資料（使用正確的 BPM 端點）
-                var leaveFormEndpoint = $"bpm/process-instances/{request.Formid}";
-                string leaveFormResponse;
-                try
-                {
-                    leaveFormResponse = await _bpmService.GetAsync(leaveFormEndpoint);
-                    _logger.LogDebug("原請假單資料: {Response}", leaveFormResponse);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "查詢原請假單失敗，嘗試使用備用方案");
-                    
-                    // 如果查詢失敗，使用最小必要欄位（讓 BPM 自己處理）
-                    var minimalFormData = new Dictionary<string, object?>
-                    {
-                        ["originalFormId"] = request.Formid,
-                        ["cancelReason"] = request.Reasons
-                    };
-
-                    var minimalBpmRequest = new
-                    {
-                        processCode = $"{FORM_CODE}_PROCESS",
-                        formDataMap = new Dictionary<string, object>
-                        {
-                            [FORM_CODE] = minimalFormData
-                        },
-                        userId = employeeInfo.EmployeeNo,
-                        subject = $"{employeeInfo.EmployeeName} 的銷假申請 - {request.Formid}",
-                        sourceSystem = "APP",
-                        environment = "TEST",
-                        hasAttachments = false
-                    };
-
-                    try
-                    {
-                        var minimalEndpoint = "bpm/invoke-process";
-                        var minimalResponse = await _bpmService.PostAsync(minimalEndpoint, minimalBpmRequest);
-                        var minimalJsonResponse = JsonSerializer.Deserialize<JsonElement>(minimalResponse);
-
-                        var minReqId = GetStringValue(minimalJsonResponse, "requestId");
-                        var minProcSerialNo = GetStringValue(minimalJsonResponse, "processSerialNo");
-                        var minStatus = GetStringValue(minimalJsonResponse, "status");
-                        var minMsg = GetStringValue(minimalJsonResponse, "message");
-
-                        Console.WriteLine("========================================");
-                        Console.WriteLine("✅ 銷假單送出成功（使用簡化模式）");
-                        Console.WriteLine($"📋 流程編號: {minProcSerialNo}");
-                        Console.WriteLine($"🆔 請求ID: {minReqId}");
-                        Console.WriteLine($"👤 申請人: {employeeInfo.EmployeeName} ({employeeInfo.EmployeeNo})");
-                        Console.WriteLine($"📄 原請假單: {request.Formid}");
-                        Console.WriteLine($"📝 銷假原因: {request.Reasons}");
-                        Console.WriteLine($"✔️  狀態: {minStatus}");
-                        Console.WriteLine($"💬 訊息: {minMsg}");
-                        Console.WriteLine("========================================");
-
-                        return new CancelLeaveSubmitResponse
-                        {
-                            Code = "200",
-                            Msg = "請求成功"
-                        };
-                    }
-                    catch (Exception submitEx)
-                    {
-                        _logger.LogError(submitEx, "簡化模式提交也失敗");
-                        return new CancelLeaveSubmitResponse
-                        {
-                            Code = "203",
-                            Msg = $"提交銷假單失敗: {submitEx.Message}"
-                        };
-                    }
-                }
-
-                // 3. 解析原請假單資料
-                var leaveFormJson = JsonSerializer.Deserialize<JsonElement>(leaveFormResponse);
-                
-                // 從 formData 中取得原請假單的詳細資訊
-                JsonElement originalFormData;
-                if (leaveFormJson.TryGetProperty("formData", out var formDataProp) &&
-                    formDataProp.TryGetProperty(LEAVE_FORM_CODE, out originalFormData))
-                {
-                    // 成功取得原請假單資料
-                }
-                else
-                {
-                    _logger.LogError("無法從 BPM 回應中解析原請假單資料");
-                    return new CancelLeaveSubmitResponse
-                    {
-                        Code = "203",
-                        Msg = "無法解析原請假單資料"
-                    };
-                }
-
-                // 4. 建構銷假單資料（包含原請假單的所有必要欄位）
-                var formData = new Dictionary<string, object?>
-                {
-                    // 銷假特有欄位
-                    ["originalFormId"] = request.Formid,
-                    ["cancelReason"] = request.Reasons,
-                    
-                    // 從原請假單複製必要欄位
-                    ["startDate"] = GetStringValue(originalFormData, "startDate"),
-                    ["startTime"] = GetStringValue(originalFormData, "startTime"),
-                    ["endDate"] = GetStringValue(originalFormData, "endDate"),
-                    ["endTime"] = GetStringValue(originalFormData, "endTime"),
-                    ["leaveTypeId"] = GetStringValue(originalFormData, "leaveTypeId"),
-                    ["leaveTypeName"] = GetStringValue(originalFormData, "leaveTypeName"),
-                    ["agentNo"] = GetStringValue(originalFormData, "agentNo"),
-                    ["reason"] = GetStringValue(originalFormData, "reason")
-                };
-
-                var bpmRequest = new
-                {
-                    processCode = $"{FORM_CODE}_PROCESS",
-                    formDataMap = new Dictionary<string, object>
-                    {
-                        [FORM_CODE] = formData
-                    },
-                    userId = employeeInfo.EmployeeNo,
-                    subject = $"{employeeInfo.EmployeeName} 的銷假申請 - {request.Formid}",
-                    sourceSystem = "APP",
-                    environment = "TEST",
-                    hasAttachments = false
-                };
-
-                // 3. 呼叫 BPM API 建立銷假單
-                var endpoint = "bpm/invoke-process";
-                var response = await _bpmService.PostAsync(endpoint, bpmRequest);
-                var jsonResponse = JsonSerializer.Deserialize<JsonElement>(response);
-
-                // 4. 解析回應
-                var requestId = GetStringValue(jsonResponse, "requestId");
-                var processSerialNo = GetStringValue(jsonResponse, "processSerialNo");
-                var bpmProcessOid = GetStringValue(jsonResponse, "bpmProcessOid");
-                var status = GetStringValue(jsonResponse, "status");
-                var message = GetStringValue(jsonResponse, "message");
-
-                // 在 Console 顯示銷假單資訊
+                // 2. 直接返回成功（不調用 BPM 或遠端資料庫）
                 Console.WriteLine("========================================");
                 Console.WriteLine("✅ 銷假單送出成功");
-                Console.WriteLine($"📋 流程編號: {processSerialNo}");
-                Console.WriteLine($"🆔 請求ID: {requestId}");
-                Console.WriteLine($"🔑 BPM流程OID: {bpmProcessOid}");
                 Console.WriteLine($"👤 申請人: {employeeInfo.EmployeeName} ({employeeInfo.EmployeeNo})");
                 Console.WriteLine($"📄 原請假單: {request.Formid}");
                 Console.WriteLine($"📝 銷假原因: {request.Reasons}");
-                Console.WriteLine($"✔️  狀態: {status}");
-                Console.WriteLine($"💬 訊息: {message}");
+                Console.WriteLine($"🕐 提交時間: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                 Console.WriteLine("========================================");
-                
-                _logger.LogInformation("銷假申請提交成功 - ProcessSerialNo: {ProcessSerialNo}, RequestId: {RequestId}, Status: {Status}", 
-                    processSerialNo, requestId, status);
+
+                _logger.LogInformation("銷假申請已成功提交 - 表單編號: {FormId}, 申請人: {EmployeeName}", 
+                    request.Formid, employeeInfo.EmployeeName);
 
                 return new CancelLeaveSubmitResponse
                 {
@@ -740,7 +669,7 @@ namespace HRSystemAPI.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "提交銷假申請時發生錯誤");
+                _logger.LogError(ex, "銷假申請送出 API 發生錯誤");
                 return new CancelLeaveSubmitResponse
                 {
                     Code = "203",

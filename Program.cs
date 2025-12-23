@@ -2,6 +2,7 @@
 using HRSystemAPI.Services;
 using HRSystemAPI.Filters;
 using Microsoft.OpenApi.Models;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -31,6 +32,44 @@ builder.Services.AddScoped<IWorkSetService, WorkSetService>(); // 考勤超時�
 builder.Services.AddScoped<ICancelLeaveService, CancelLeaveService>(); // 銷假單服務
 builder.Services.AddScoped<IReviewService, ReviewService>(); // 待我審核服務
 
+// ===== 註冊 BPM Read 服務 =====
+builder.Services.AddScoped<IBpmReadService, BpmReadService>(); // BPM 表單讀取服務
+
+// ===== 註冊電子名片服務 =====
+builder.Services.AddScoped<IBusinessCardService, BusinessCardService>(); // 電子名片服務
+
+// ===== 註冊錯誤日誌服務 =====
+// 暫時不連接 MySQL，使用 Mock 服務
+// builder.Services.AddDbContext<ApiErrorLogDbContext>(options =>
+//     options.UseMySql(
+//         builder.Configuration.GetConnectionString("DefaultConnection"),
+//         new MySqlServerVersion(new Version(8, 0, 21)) // 使用固定版本避免啟動時連線
+//     )
+// );
+builder.Services.AddScoped<IApiErrorLogService, ApiErrorLogService>();
+
+// ===== 註冊 BPM 表單同步服務 (MySQL - 本地和遠端) =====
+// 暫時不連接 MySQL
+// 本地資料庫 (localhost:3307)
+// builder.Services.AddDbContext<BpmFormDbContext>(options =>
+//     options.UseMySql(
+//         builder.Configuration.GetConnectionString("DefaultConnection"),
+//         new MySqlServerVersion(new Version(8, 0, 21)) // 使用固定版本避免啟動時連線
+//     )
+// );
+// 遠端資料庫 (54.46.24.34:3306)
+// builder.Services.AddDbContext<RemoteBpmFormDbContext>(options =>
+//     options.UseMySql(
+//         builder.Configuration.GetConnectionString("RemoteBpmDb"),
+//         new MySqlServerVersion(new Version(8, 0, 21)) // 使用固定版本避免啟動時連線
+//     )
+// );
+builder.Services.AddScoped<IBpmFormRepository, BpmFormRepository>();
+builder.Services.AddScoped<IBpmFormSyncService, BpmFormSyncService>();
+
+// ===== 註冊請假單申請記錄服務 =====
+builder.Services.AddScoped<ILeaveApplicationRepository, LeaveApplicationRepository>();
+
 // ===== 註冊薪資查詢服務 =====
 builder.Services.AddScoped<ISalaryService, SalaryService>();
 
@@ -41,8 +80,23 @@ builder.Services.AddScoped<TokenValidationFilter>();
 // ===== 註冊電子表單選單服務 =====
 builder.Services.AddScoped<IEFormsMenuService, EFormsMenuService>();
 
+// ===== 註冊電子表單類型服務 =====
+builder.Services.AddScoped<IEFormTypeService, EFormTypeService>();
+
 // ===== 註冊我的表單服務 =====
 builder.Services.AddScoped<IEFormMyService, EFormMyService>();
+
+// ===== 註冊簽核記錄數據庫服務 (54.46.24.34) =====
+builder.Services.AddDbContext<EFormApprovalDbContext>(options =>
+    options.UseMySql(
+        builder.Configuration.GetConnectionString("DefaultConnection"),
+        new MySqlServerVersion(new Version(8, 0, 21))
+    )
+);
+builder.Services.AddScoped<IEFormApprovalRepository, EFormApprovalRepository>();
+
+// ===== 註冊我的簽核列表服務 =====
+builder.Services.AddScoped<IEFormMySignService, EFormMySignService>();
 
 // ===== 註冊簽核記錄詳細資料服務 =====
 builder.Services.AddScoped<IEFormRecordService, EFormRecordService>();
@@ -53,10 +107,22 @@ builder.Services.AddScoped<IEFormWithdrawService, EFormWithdrawService>();
 // ===== 註冊 FTP 和 BPM 設定 =====
 builder.Services.Configure<FtpSettings>(builder.Configuration.GetSection("FtpSettings"));
 builder.Services.Configure<BpmSettings>(builder.Configuration.GetSection("BpmSettings"));
+builder.Services.Configure<AttachmentSettings>(builder.Configuration.GetSection("AttachmentSettings"));
 
 // ===== 註冊 SMTP 和薪資驗證設定 =====
 builder.Services.Configure<SmtpSettings>(builder.Configuration.GetSection("SmtpSettings"));
 builder.Services.Configure<SalaryVerificationSettings>(builder.Configuration.GetSection("SalaryVerification"));
+
+// ===== 註冊 FTP 服務 =====
+builder.Services.AddScoped<FtpService>();
+
+// ===== 註冊 HttpClient（用於附件服務查詢）=====
+builder.Services.AddHttpClient<IAttachmentService, AttachmentService>(client =>
+{
+    // 設定較長的超時時間以處理大型檔案查詢
+    client.Timeout = TimeSpan.FromSeconds(30);
+    client.DefaultRequestHeaders.Add("Accept", "application/json");
+});
 
 // ===== 註冊 HttpClient（使用 Header 認證）=====
 // ⭐⭐⭐ 重要:BPM API 使用 X-API-Key 和 X-API-Secret Header 進行認證 ⭐⭐⭐
@@ -227,6 +293,26 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// ===== 自動建立資料庫和遷移表 =====
+try
+{
+    using (var scope = app.Services.CreateScope())
+    {
+        var eformApprovalDbContext = scope.ServiceProvider.GetRequiredService<EFormApprovalDbContext>();
+        
+        // 確保資料庫存在並執行遷移
+        eformApprovalDbContext.Database.EnsureCreated();
+        
+        var initLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        initLogger.LogInformation("EFormApprovalRecords 資料表初始化完成");
+    }
+}
+catch (Exception ex)
+{
+    var appLogger = app.Services.GetRequiredService<ILogger<Program>>();
+    appLogger.LogError(ex, "資料表初始化失敗");
+}
 
 // ===== Swagger 設定（所有環境都可用,包含外網訪問）=====
 app.UseSwagger();

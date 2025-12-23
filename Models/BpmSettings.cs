@@ -143,5 +143,36 @@
         /// 上傳路徑
         /// </summary>
         public string UploadPath { get; set; } = "/uploads/attachments/";
+
+        /// <summary>
+        /// 是否使用 SFTP（預設 false 表示使用 FTP）
+        /// </summary>
+        public bool UseSftp { get; set; } = false;
+
+        /// <summary>
+        /// 協議類型（FTP 或 SFTP）
+        /// </summary>
+        public string Protocol { get; set; } = "FTP";
+    }
+
+    /// <summary>
+    /// 附件服務設定
+    /// </summary>
+    public class AttachmentSettings
+    {
+        /// <summary>
+        /// 上傳 API 地址
+        /// </summary>
+        public string UploadApiUrl { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 查詢 API 地址
+        /// </summary>
+        public string QueryApiUrl { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 附件服務基礎 URL
+        /// </summary>
+        public string BaseUrl { get; set; } = string.Empty;
     }
 }

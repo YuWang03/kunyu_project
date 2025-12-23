@@ -10,6 +10,7 @@ namespace HRSystemAPI.Services
         private readonly BpmService _bpmService;
         private readonly FtpService _ftpService;
         private readonly IBasicInfoService _basicInfoService;
+        private readonly IBpmFormSyncService _formSyncService;
         private readonly ILogger<OvertimeFormService> _logger;
         private readonly IConfiguration _configuration;
         private readonly string _connectionString;
@@ -20,12 +21,14 @@ namespace HRSystemAPI.Services
             BpmService bpmService, 
             FtpService ftpService, 
             IBasicInfoService basicInfoService,
+            IBpmFormSyncService formSyncService,
             ILogger<OvertimeFormService> logger,
             IConfiguration configuration)
         {
             _bpmService = bpmService;
             _ftpService = ftpService;
             _basicInfoService = basicInfoService;
+            _formSyncService = formSyncService;
             _logger = logger;
             _configuration = configuration;
             _connectionString = configuration.GetConnectionString("HRDatabase")
@@ -371,14 +374,42 @@ namespace HRSystemAPI.Services
                 }
                 catch { }
                 
-                // 存儲申請紀錄到數據庫
+                // 存儲申請紀錄到 SQL Server 數據庫
                 try
                 {
                     await StoreOvertimeApplicationAsync(request, processSerialNo, formId);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "存儲加班申請紀錄失敗，但不影響申請結果");
+                    _logger.LogWarning(ex, "存儲加班申請紀錄到 SQL Server 失敗，但不影響申請結果");
+                }
+                
+                // 儲存加班單到本地 MySQL DB (54.46.24.34)
+                try
+                {
+                    var overtimeForm = new BpmForm
+                    {
+                        FormId = formId ?? processSerialNo ?? Guid.NewGuid().ToString(),
+                        FormCode = FORM_CODE,
+                        FormType = "OVERTIME",
+                        FormVersion = FORM_VERSION,
+                        ApplicantId = request.Uid,
+                        ApplicantName = employeeInfo?.EmployeeName ?? "",
+                        ApplicantDepartment = employeeInfo?.DepartmentName,
+                        Status = "PENDING",
+                        ApplyDate = DateTime.Now,
+                        SubmitTime = DateTime.Now,
+                        LastSyncTime = DateTime.Now,
+                        IsSyncedToBpm = true
+                    };
+                    overtimeForm.SetFormData(formData);
+
+                    await _formSyncService.SaveFormToLocalAsync(overtimeForm);
+                    _logger.LogInformation("加班單已儲存到本地 MySQL DB: {FormId}", overtimeForm.FormId);
+                }
+                catch (Exception dbEx)
+                {
+                    _logger.LogWarning(dbEx, "儲存加班單到本地 MySQL DB 失敗，但 BPM 提交已成功");
                 }
                 
                 _logger.LogInformation("✅ 加班單預申請成功");
@@ -415,7 +446,7 @@ namespace HRSystemAPI.Services
             {
                 _logger.LogInformation("取得加班確認申請列表 - uid: {Uid}, cid: {Cid}", request.Uid, request.Cid);
 
-                // 1. 查詢員工基本資料
+                // 1. 查詢員工基本資料（用於取得員工姓名和部門）
                 var employeeInfo = await _basicInfoService.GetEmployeeByIdAsync(request.Uid);
                 if (employeeInfo == null)
                 {
@@ -426,7 +457,7 @@ namespace HRSystemAPI.Services
                     };
                 }
 
-                // 2. 呼叫 BPM API 取得員工的待辦事項清單
+                // 2. 呼叫 BPM API 取得員工的待辦事項清單（直接使用 request.Uid）
                 var workItemsEndpoint = $"bpm/workitems/{request.Uid}";
                 string workItemsResponse;
                 try
@@ -458,7 +489,7 @@ namespace HRSystemAPI.Services
                     };
                 }
 
-                // 3. 取得 workItems 陣列並篩選加班表單 (PI_OVERTIME_001_PROCESS)
+                // 3. 取得 workItems 陣列並篩選加班表單 (PI_MattOvertime_Process_HRM)
                 var overtimeList = new List<EFotConfirmListItem>();
                 
                 if (workItemsJson.TryGetProperty("workItems", out var workItemsArray) && 
@@ -468,53 +499,86 @@ namespace HRSystemAPI.Services
                     {
                         var processSerialNumber = workItem.GetProperty("processSerialNumber").GetString() ?? "";
                         
-                        // 4. 透過 processSerialNumber 查詢表單資訊，判斷是否為加班表單
+                        // 只處理加班單 (PI_MattOvertime_Process_HRM 開頭)
+                        if (!processSerialNumber.StartsWith("PI_MattOvertime_Process_HRM"))
+                        {
+                            continue;
+                        }
+                        
+                        // 4. 透過 processSerialNumber 查詢表單完整資訊
                         try
                         {
                             var syncProcessEndpoint = $"bpm/sync-process-info?processSerialNo={processSerialNumber}&processCode=PI_OVERTIME_001_PROCESS&environment=TEST";
                             var syncProcessResponse = await _bpmService.GetAsync(syncProcessEndpoint);
                             var syncProcessJson = JsonSerializer.Deserialize<JsonElement>(syncProcessResponse);
                             
-                            // 檢查是否成功且為加班表單
+                            // 檢查是否成功
                             if (syncProcessJson.TryGetProperty("status", out var syncStatus) && 
                                 syncStatus.GetString() == "SUCCESS")
                             {
                                 _logger.LogInformation("找到加班表單 - ProcessSerialNo: {ProcessSerialNo}", processSerialNumber);
                                 
-                                // 5. 從本地數據庫查詢加班申請詳情
-                                var formData = await QueryOvertimeApplicationAsync(processSerialNumber);
-                                
-                                if (formData != null)
+                                // 5. 從 BPM 回應中解析表單資料
+                                if (syncProcessJson.TryGetProperty("formInfo", out var formInfo) &&
+                                    formInfo.TryGetProperty("PI_OVERTIME_001", out var overtimeForm))
                                 {
-                                    // 取得處理方式文字
-                                    var processText = formData.Eprocess == "C" ? "補休" : "加班費";
+                                    // 從 processInfo 取得申請人資訊
+                                    string requesterIdEmployeeId = "";
+                                    string requesterName = "";
+                                    if (syncProcessJson.TryGetProperty("processInfo", out var processInfo))
+                                    {
+                                        requesterIdEmployeeId = processInfo.TryGetProperty("requesterIdEmployeeId", out var reqIdEl) ? reqIdEl.GetString() ?? "" : "";
+                                        requesterName = processInfo.TryGetProperty("requesterName", out var reqNameEl) ? reqNameEl.GetString() ?? "" : "";
+                                    }
+                                    
+                                    // 解析加班單資料
+                                    var applierName = overtimeForm.TryGetProperty("applierName", out var nameEl) ? nameEl.GetString() : requesterName;
+                                    var orgName = overtimeForm.TryGetProperty("orgName", out var orgEl) ? orgEl.GetString() : "";
+                                    var applyDate = overtimeForm.TryGetProperty("applyDate", out var dateEl) ? dateEl.GetString() : "";
+                                    var startTimeF = overtimeForm.TryGetProperty("startTimeF", out var startEl) ? startEl.GetString() : "";
+                                    var endTimeF = overtimeForm.TryGetProperty("endTimeF", out var endEl) ? endEl.GetString() : "";
+                                    var detail = overtimeForm.TryGetProperty("detail", out var detailEl) ? detailEl.GetString() : "";
+                                    var processType = overtimeForm.TryGetProperty("processType", out var procEl) ? procEl.GetString() : "1";
+                                    var applierIdEmployeeId = overtimeForm.TryGetProperty("applierIdEmployeeId", out var applierIdEl) ? applierIdEl.GetString() : requesterIdEmployeeId;
+                                    
+                                    // 處理日期和時間格式
+                                    // applyDate 格式: "2025/11/28"
+                                    // startTimeF 格式: "18:30"
+                                    // endTimeF 格式: "20:30"
+                                    var startDate = applyDate?.Replace("/", "-") ?? "";
+                                    var endDate = startDate;
+                                    var startTime = startTimeF ?? "";
+                                    var endTime = endTimeF ?? "";
+                                    
+                                    // 處理方式: processType "1" = 加班費, 其他 = 補休
+                                    var processText = processType == "1" ? "加班費" : "補休";
                                     
                                     overtimeList.Add(new EFotConfirmListItem
                                     {
-                                        Uid = formData.Uid ?? request.Uid,
-                                        Uname = employeeInfo.EmployeeName,
-                                        Udepartment = employeeInfo.DepartmentName ?? "",
-                                        Formid = formData.Formid ?? processSerialNumber,
-                                        Estartdate = formData.Estartdate ?? "",
-                                        Estarttime = formData.Estarttime ?? "",
-                                        Eenddate = formData.Eenddate ?? "",
-                                        Eendtime = formData.Eendtime ?? "",
-                                        Ereason = formData.Ereason ?? "",
+                                        Uid = applierIdEmployeeId ?? requesterIdEmployeeId,
+                                        Uname = applierName ?? requesterName,
+                                        Udepartment = orgName ?? "",
+                                        Formid = processSerialNumber,
+                                        Estartdate = startDate,
+                                        Estarttime = startTime,
+                                        Eenddate = endDate,
+                                        Eendtime = endTime,
+                                        Ereason = detail ?? "",
                                         Eprocess = processText
                                     });
                                     
-                                    _logger.LogInformation("成功解析加班表單 - FormId: {FormId}", formData.Formid);
+                                    _logger.LogInformation("成功解析加班表單 - FormId: {FormId}", processSerialNumber);
                                 }
                                 else
                                 {
-                                    _logger.LogWarning("在本地數據庫中找不到加班申請詳情 - ProcessSerialNo: {ProcessSerialNo}", processSerialNumber);
+                                    _logger.LogWarning("找不到表單資料 - ProcessSerialNo: {ProcessSerialNo}", processSerialNumber);
                                 }
                             }
                         }
                         catch (Exception ex)
                         {
-                            // 如果不是加班表單或查詢失敗，跳過此 workItem
-                            _logger.LogDebug(ex, "ProcessSerialNo: {ProcessSerialNo} 不是加班表單或查詢失敗，跳過", processSerialNumber);
+                            // 查詢失敗，跳過此 workItem
+                            _logger.LogWarning(ex, "查詢加班表單失敗，跳過 - ProcessSerialNo: {ProcessSerialNo}", processSerialNumber);
                             continue;
                         }
                     }
@@ -556,6 +620,11 @@ namespace HRSystemAPI.Services
                 {
                     _logger.LogInformation("從數據庫找到加班申請紀錄 - FormId: {FormId}", request.Formid);
                     
+                    // 獲取員工信息
+                    var employeeInfo = await _basicInfoService.GetEmployeeByIdAsync(request.Uid);
+                    var employeeName = employeeInfo?.EmployeeName ?? "";
+                    var department = employeeInfo?.Department ?? "";
+                    
                     // 解析處理方式
                     var processText = applicationData.Eprocess == "C" ? "補休" : "加班費";
 
@@ -589,6 +658,9 @@ namespace HRSystemAPI.Services
                         Msg = "請求成功",
                         Data = new EFotPreviewData
                         {
+                            Uid = request.Uid,
+                            Uname = employeeName,
+                            Udepartment = department,
                             Formid = request.Formid,
                             Estartdate = startDate.Replace("/", "-"),
                             Estarttime = startTime,
@@ -602,20 +674,41 @@ namespace HRSystemAPI.Services
                     };
                 }
 
-                // 2. 如果數據庫中找不到，則嘗試呼叫 BPM API
-                _logger.LogInformation("數據庫中未找到記錄，嘗試呼叫 BPM API - FormId: {FormId}", request.Formid);
+                // 2. 如果數據庫中找不到，則呼叫 BPM sync-process-info API
+                _logger.LogInformation("數據庫中未找到記錄，嘗試呼叫 BPM sync-process-info API - FormId: {FormId}", request.Formid);
                 
-                var endpoint = $"bpm/form-detail?formId={request.Formid}";
+                // 使用 sync-process-info 端點取得完整的表單資訊
+                var endpoint = $"bpm/sync-process-info?processSerialNo={Uri.EscapeDataString(request.Formid)}&processCode=PI_OVERTIME_001_PROCESS&formCode=PI_OVERTIME_001&formVersion=1.0.0";
                 var response = await _bpmService.GetAsync(endpoint);
                 var jsonResponse = JsonSerializer.Deserialize<JsonElement>(response);
 
-                // 解析表單資料
-                if (jsonResponse.TryGetProperty("data", out var dataElement))
+                // 檢查 API 回應狀態
+                if (jsonResponse.TryGetProperty("status", out var statusElement) && 
+                    statusElement.GetString() != "SUCCESS")
                 {
-                    var formData = dataElement.GetProperty("formData");
-                    
-                    // 解析處理方式
-                    var processTypeValue = formData.GetProperty("processType").GetString();
+                    _logger.LogWarning("BPM API 回應失敗 - Status: {Status}", statusElement.GetString());
+                    return new EFotPreviewResponse
+                    {
+                        Code = "203",
+                        Msg = "請求失敗，找不到表單"
+                    };
+                }
+
+                // 解析表單資料 (從 formInfo.PI_OVERTIME_001 取得)
+                if (jsonResponse.TryGetProperty("formInfo", out var formInfoElement) &&
+                    formInfoElement.TryGetProperty("PI_OVERTIME_001", out var formData))
+                {
+                    _logger.LogInformation("成功從 BPM 取得加班單資料 - FormId: {FormId}", request.Formid);
+
+                    // 獲取員工信息
+                    var employeeInfo = await _basicInfoService.GetEmployeeByIdAsync(request.Uid);
+                    var employeeName = employeeInfo?.EmployeeName ?? "";
+                    var department = employeeInfo?.Department ?? "";
+
+                    // 解析處理方式 (processType: "0" = 補休, "1" = 加班費)
+                    var processTypeValue = formData.TryGetProperty("processType", out var processTypeProp) 
+                        ? processTypeProp.GetString() 
+                        : "1";
                     var processText = processTypeValue == "0" ? "補休" : "加班費";
 
                     // 解析附件
@@ -625,7 +718,7 @@ namespace HRSystemAPI.Services
                         var filePath = filePathProp.GetString();
                         if (!string.IsNullOrEmpty(filePath))
                         {
-                            var files = filePath.Split("||");
+                            var files = filePath.Split(new[] { "||" }, StringSplitOptions.RemoveEmptyEntries);
                             attachments = new List<EFotAttachment>();
                             for (int i = 0; i < files.Length; i++)
                             {
@@ -641,11 +734,23 @@ namespace HRSystemAPI.Services
                         }
                     }
 
-                    // 解析時間資料
-                    var startTimeF = formData.GetProperty("startTimeF").GetString() ?? "";
-                    var endTimeF = formData.GetProperty("endTimeF").GetString() ?? "";
-                    var startParts = startTimeF.Split(' ');
-                    var endParts = endTimeF.Split(' ');
+                    // 解析時間資料 (startTimeF: "18:30", endTimeF: "20:30", applyDate: "2025/11/28")
+                    var applyDate = formData.TryGetProperty("applyDate", out var applyDateProp) 
+                        ? applyDateProp.GetString() ?? "" 
+                        : "";
+                    var startTimeF = formData.TryGetProperty("startTimeF", out var startTimeProp) 
+                        ? startTimeProp.GetString() ?? "" 
+                        : "";
+                    var endTimeF = formData.TryGetProperty("endTimeF", out var endTimeProp) 
+                        ? endTimeProp.GetString() ?? "" 
+                        : "";
+                    var detail = formData.TryGetProperty("detail", out var detailProp) 
+                        ? detailProp.GetString() ?? "" 
+                        : "";
+
+                    // 轉換日期格式 (從 yyyy/MM/dd 轉為 yyyy-MM-dd)
+                    var startDate = applyDate.Replace("/", "-");
+                    var endDate = applyDate.Replace("/", "-");
 
                     return new EFotPreviewResponse
                     {
@@ -653,12 +758,15 @@ namespace HRSystemAPI.Services
                         Msg = "請求成功",
                         Data = new EFotPreviewData
                         {
+                            Uid = request.Uid,
+                            Uname = employeeName,
+                            Udepartment = department,
                             Formid = request.Formid,
-                            Estartdate = startParts.Length > 0 ? startParts[0] : "",
-                            Estarttime = startParts.Length > 1 ? startParts[1] : "",
-                            Eenddate = endParts.Length > 0 ? endParts[0] : "",
-                            Eendtime = endParts.Length > 1 ? endParts[1] : "",
-                            Ereason = formData.GetProperty("detail").GetString() ?? "",
+                            Estartdate = startDate,
+                            Estarttime = startTimeF,
+                            Eenddate = endDate,
+                            Eendtime = endTimeF,
+                            Ereason = detail,
                             Eprocess = processText,
                             Efiletype = attachments != null && attachments.Count > 0 ? "D" : null,
                             Attachments = attachments
@@ -666,6 +774,7 @@ namespace HRSystemAPI.Services
                     };
                 }
 
+                _logger.LogWarning("BPM API 回應中未找到表單資料 - FormId: {FormId}", request.Formid);
                 return new EFotPreviewResponse
                 {
                     Code = "203",
@@ -687,37 +796,88 @@ namespace HRSystemAPI.Services
         {
             try
             {
-                _logger.LogInformation("加班單確認申請送出 - formid: {FormId}", request.Formid);
+                _logger.LogInformation("加班單確認申請送出 - formid: {FormId}, uid: {Uid}", request.Formid, request.Uid);
 
-                // 組合實際加班時間
-                var actualStartTime = $"{request.Astartdate} {request.Astarttime}";
-                var actualEndTime = $"{request.Aenddate} {request.Aendtime}";
-
-                // 處理附件檔案路徑
-                string? filePath = null;
-                if (request.Efileid != null && request.Efileid.Count > 0 && request.Efiletype == "D")
+                // 檢查必要欄位
+                if (string.IsNullOrEmpty(request.Astartdate) || string.IsNullOrEmpty(request.Astarttime) ||
+                    string.IsNullOrEmpty(request.Aenddate) || string.IsNullOrEmpty(request.Aendtime))
                 {
-                    var ftpPaths = request.Efileid.Select(id => $"FTPTest~~/FTPShare/overtime_confirm_{id}.pdf").ToList();
-                    filePath = string.Join("||", ftpPaths);
+                    _logger.LogWarning("加班單確認申請失敗 - 缺少必要的時間欄位");
+                    return new EFotConfirmSubmitResponse
+                    {
+                        Code = "203",
+                        Msg = "請求失敗，缺少加班時間資訊"
+                    };
                 }
 
-                // 更新表單的實際加班時間
-                var updateData = new Dictionary<string, object?>
+                // 檢查是否有附件並準備檔案路徑
+                bool hasAttachments = request.Efileid != null && request.Efileid.Count > 0;
+                string? filePath = null;
+
+                if (hasAttachments)
                 {
-                    ["startTime"] = actualStartTime.Replace("-", "/"),
-                    ["endTime"] = actualEndTime.Replace("-", "/")
+                    if (!string.IsNullOrEmpty(request.Efileurl))
+                    {
+                        // 優先使用提供的 efileurl（上傳後返回的檔案路徑）
+                        filePath = request.Efileurl;
+                    }
+                    else if (request.Efileid != null && request.Efileid.Count > 0)
+                    {
+                        // 根據檔案 ID 構建 FTP 路徑
+                        var ftpPaths = request.Efileid.Select(id => $"FTPTest~~/FTPShare/overtime_{id}.pdf").ToList();
+                        filePath = string.Join("||", ftpPaths);
+                    }
+                }
+
+                // 取得當前日期（用於 applyDate 和 fillFormDate）
+                var currentDate = DateTime.Now.ToString("yyyy/MM/dd");
+
+                // 準備表單資料 - 按照標準 BPM 格式，包含所有必需的欄位
+                var formData = new Dictionary<string, object?>
+                {
+                    ["detail"] = "加班單確認",  // 詳情描述
+                    ["applyDate"] = currentDate,  // 申請日期（BPM 需要此欄位）
+                    ["fillFormDate"] = currentDate,  // 填表日期
+                    ["startTime"] = request.Astarttime,
+                    ["startTimeF"] = request.Astarttime,  // BPM 需要此欄位
+                    ["endTime"] = request.Aendtime,
+                    ["endTimeF"] = request.Aendtime,  // BPM 需要此欄位
+                    ["startDate"] = request.Astartdate.Replace("-", "/"),
+                    ["endDate"] = request.Aenddate.Replace("-", "/"),
+                    ["processType"] = "0"  // 流程類型
                 };
 
+                // 如果有附件路徑，加入檔案路徑（必須有此欄位當 hasAttachments=true）
                 if (!string.IsNullOrEmpty(filePath))
                 {
-                    updateData["filePath"] = filePath;
+                    formData["filePath"] = filePath;
+                    _logger.LogInformation("加班確認附件路徑: {FilePath}", filePath);
                 }
 
-                // TODO: 呼叫 BPM API 更新表單
-                var endpoint = $"bpm/update-form?formId={request.Formid}";
-                var response = await _bpmService.PostAsync(endpoint, updateData);
+                // 構造 BPM 標準請求格式
+                var formDataMap = new Dictionary<string, object?>
+                {
+                    ["PI_OVERTIME_001"] = formData
+                };
 
-                _logger.LogInformation("加班單確認申請送出成功 - formid: {FormId}", request.Formid);
+                var bpmRequest = new
+                {
+                    processCode = "PI_OVERTIME_001_PROCESS",
+                    formDataMap = formDataMap,
+                    userId = request.Uid,
+                    subject = "加班單確認申請",
+                    sourceSystem = "APP",
+                    environment = "TEST",
+                    hasAttachments = hasAttachments
+                };
+
+                _logger.LogInformation("發送 BPM 加班確認請求: ProcessCode={ProcessCode}, FormId={FormId}, UserId={UserId}, HasAttachments={HasAttachments}", 
+                    "PI_OVERTIME_001_PROCESS", request.Formid, request.Uid, hasAttachments);
+
+                var response = await _bpmService.PostAsyncWithoutCamelCase("bpm/invoke-process", bpmRequest);
+
+                _logger.LogInformation("加班單確認申請送出成功 - formid: {FormId}, Response: {Response}", 
+                    request.Formid, response);
 
                 return new EFotConfirmSubmitResponse
                 {
@@ -727,7 +887,7 @@ namespace HRSystemAPI.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "加班單確認申請送出失敗");
+                _logger.LogError(ex, "加班單確認申請送出失敗 - formid: {FormId}, uid: {Uid}", request.Formid, request.Uid);
                 return new EFotConfirmSubmitResponse
                 {
                     Code = "500",
@@ -746,7 +906,7 @@ namespace HRSystemAPI.Services
         }
 
         /// <summary>
-        /// API: 加班確認提交（POST /app/fotconfirm）
+        /// API: 加班確認提交（POST /app/efotconfirmlist）
         /// 提交實際發生的加班申請表單，填具實際的加班時間及所需附件後送出
         /// 1. 先同步加班資訊 (sync-process-info)
         /// 2. 取得待辦事項 (workitems)

@@ -7,20 +7,24 @@ namespace HRSystemAPI.Services
 {
     /// <summary>
     /// 簽核記錄撤回服務實作
+    /// 整合本地 DB 同步功能
     /// </summary>
     public class EFormWithdrawService : IEFormWithdrawService
     {
         private readonly BpmService _bpmService;
+        private readonly IBpmFormSyncService _formSyncService;
         private readonly ILogger<EFormWithdrawService> _logger;
         private readonly IConfiguration _configuration;
         private readonly string _hrDatabaseConnectionString;
 
         public EFormWithdrawService(
-            BpmService bpmService, 
+            BpmService bpmService,
+            IBpmFormSyncService formSyncService,
             ILogger<EFormWithdrawService> logger,
             IConfiguration configuration)
         {
             _bpmService = bpmService;
+            _formSyncService = formSyncService;
             _logger = logger;
             _configuration = configuration;
             _hrDatabaseConnectionString = configuration.GetConnectionString("HRDatabase") ?? "";
@@ -88,6 +92,27 @@ namespace HRSystemAPI.Services
                 if (isSuccess)
                 {
                     _logger.LogInformation("表單撤回成功: {FormId}", request.EFormId);
+                    
+                    // 同步撤回狀態到本地 DB
+                    try
+                    {
+                        var cancelRequest = new FormCancelRequest
+                        {
+                            FormId = request.EFormId,
+                            CancelReason = request.Comments ?? "使用者撤回",
+                            OperatorId = request.Uid,
+                            SyncToBpm = false // 已透過 BPM API 撤回
+                        };
+                        
+                        await _formSyncService.CancelFormAsync(cancelRequest);
+                        await _formSyncService.UpdateFormStatusAsync(request.EFormId, "WITHDRAWN", request.Comments);
+                        _logger.LogInformation("撤回狀態已同步到本地 DB: {FormId}", request.EFormId);
+                    }
+                    catch (Exception dbEx)
+                    {
+                        _logger.LogWarning(dbEx, "同步撤回狀態到本地 DB 失敗: {FormId}", request.EFormId);
+                    }
+                    
                     return new EFormWithdrawResponse 
                     { 
                         Code = "200", 

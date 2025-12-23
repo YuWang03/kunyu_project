@@ -8,6 +8,7 @@ namespace HRSystemAPI.Models
         public string tokenid { get; set; } = string.Empty;
         public string cid { get; set; } = string.Empty;
         public string uid { get; set; } = string.Empty;
+        public string language { get; set; } = "T"; // T: 繁體中文, C: 簡體中文
     }
 
     /// <summary>

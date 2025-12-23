@@ -28,7 +28,6 @@ namespace HRSystemAPI.Services
         }
 
         /// <summary>
-        /// <summary>
         /// ⚠️ 已棄用：透過 Email 取得 BPM UserID
         /// BPM 中間件不支援此端點，請改用 IBasicInfoService.GetEmployeeByEmailAsync() 查詢員工工號
         /// </summary>

@@ -27,6 +27,12 @@ namespace HRSystemAPI.Models
         [Required(ErrorMessage = "使用者ID為必填")]
         [JsonPropertyName("uid")]
         public string Uid { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 語系設定 (T: 繁體中文, C: 簡體中文)
+        /// </summary>
+        [JsonPropertyName("language")]
+        public string Language { get; set; } = "T"; // 預設繁體中文
     }
 
     /// <summary>

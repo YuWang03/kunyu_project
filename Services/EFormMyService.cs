@@ -12,6 +12,12 @@ namespace HRSystemAPI.Services
         private readonly IBasicInfoService _basicInfoService;
         private readonly ILogger<EFormMyService> _logger;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="EFormMyService"/> class.
+        /// </summary>
+        /// <param name="bpmService">The BPM service.</param>
+        /// <param name="basicInfoService">The basic info service.</param>
+        /// <param name="logger">The logger instance.</param>
         public EFormMyService(
             BpmService bpmService,
             IBasicInfoService basicInfoService,
@@ -73,6 +79,10 @@ namespace HRSystemAPI.Services
                         Msg = "請求成功",
                         Data = new EFormMyData
                         {
+                            TotalCount = "0",
+                            Page = request.Page ?? "1",
+                            PageSize = request.PageSize ?? "20",
+                            TotalPages = "0",
                             EFormData = new List<EFormMyItem>()
                         }
                     };
@@ -101,6 +111,7 @@ namespace HRSystemAPI.Services
                         var formDetail = await GetFormDetailBySerialNumber(
                             workItem.ProcessSerialNumber, 
                             formType, 
+                            request.Uid,
                             userName, 
                             userDepartment);
 
@@ -122,13 +133,64 @@ namespace HRSystemAPI.Services
 
                 _logger.LogInformation("共處理了 {Count} 個我的表單", myFormItems.Count);
 
+                // 4. 根據表單類型進行篩選
+                if (!string.IsNullOrEmpty(request.EFormType))
+                {
+                    var requestedTypes = request.EFormType.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(t => t.Trim().ToUpper())
+                        .ToList();
+                    
+                    _logger.LogInformation("篩選表單類型: {Types}", string.Join(", ", requestedTypes));
+                    
+                    myFormItems = myFormItems
+                        .Where(item => requestedTypes.Contains(item.EFormType.ToUpper()))
+                        .ToList();
+                    
+                    _logger.LogInformation("篩選後剩餘 {Count} 個項目", myFormItems.Count);
+                }
+
+                // 5. 計算分頁參數
+                if (!int.TryParse(request.Page, out var pageNumber) || pageNumber < 1)
+                {
+                    pageNumber = 1;
+                }
+                
+                if (!int.TryParse(request.PageSize, out var pageSize) || pageSize < 1)
+                {
+                    pageSize = 20;
+                }
+
+                var totalCount = myFormItems.Count;
+                var totalPages = (int)Math.Ceiling((double)totalCount / pageSize);
+                
+                // 確保頁碼不超過總頁數
+                if (pageNumber > totalPages && totalPages > 0)
+                {
+                    pageNumber = totalPages;
+                }
+
+                _logger.LogInformation("分頁參數: Page={Page}, PageSize={PageSize}, TotalCount={TotalCount}, TotalPages={TotalPages}", 
+                    pageNumber, pageSize, totalCount, totalPages);
+
+                // 6. 取得當前頁的資料
+                var pagedItems = myFormItems
+                    .Skip((pageNumber - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToList();
+
+                _logger.LogInformation("返回 {Count} 個項目", pagedItems.Count);
+
                 return new EFormMyResponse
                 {
                     Code = "200",
                     Msg = "請求成功",
                     Data = new EFormMyData
                     {
-                        EFormData = myFormItems
+                        TotalCount = totalCount.ToString(),
+                        Page = pageNumber.ToString(),
+                        PageSize = pageSize.ToString(),
+                        TotalPages = totalPages.ToString(),
+                        EFormData = pagedItems
                     }
                 };
             }
@@ -193,7 +255,8 @@ namespace HRSystemAPI.Services
         /// </summary>
         private async Task<EFormMyItem?> GetFormDetailBySerialNumber(
             string serialNumber, 
-            string formType, 
+            string formType,
+            string uid,
             string userName, 
             string userDepartment)
         {
@@ -246,6 +309,7 @@ namespace HRSystemAPI.Services
                 // 建立我的表單項目
                 var item = new EFormMyItem
                 {
+                    Uid = uid,
                     UName = userName,
                     UDepartment = userDepartment,
                     FormId = serialNumber,
@@ -292,6 +356,18 @@ namespace HRSystemAPI.Services
                 // 格式化日期（移除斜線，統一格式）
                 item.EStartDate = FormatDate(item.EStartDate);
                 item.EEndDate = FormatDate(item.EEndDate);
+
+                // Ensure proper mapping for estarttitle, eformtype, eformname, and eendtitle
+                item.EFormType = formType ?? "Unknown Type";
+                item.EFormName = formType != null ? GetFormTypeName(formType) ?? "Unnamed Form" : "Unnamed Form";
+
+                // Set default titles if not already set
+                item.EStartTitle = string.IsNullOrWhiteSpace(item.EStartTitle) ? "Start Time" : item.EStartTitle;
+                item.EEndTitle = string.IsNullOrWhiteSpace(item.EEndTitle) ? "End Time" : item.EEndTitle;
+
+                // Log the populated fields for debugging
+                _logger.LogDebug("Populated fields: EFormType={EFormType}, EFormName={EFormName}, EStartTitle={EStartTitle}, EEndTitle={EEndTitle}",
+                    item.EFormType, item.EFormName, item.EStartTitle, item.EEndTitle);
 
                 _logger.LogDebug("成功建立表單項目: {@Item}", item);
                 return item;

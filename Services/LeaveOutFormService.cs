@@ -11,19 +11,26 @@ namespace HRSystemAPI.Services
         private readonly BpmService _bpmService;
         private readonly FtpService _ftpService;
         private readonly IBasicInfoService _basicInfoService;
+        private readonly IBpmFormSyncService _formSyncService;
+        private readonly IAttachmentService _attachmentService;
         private readonly ILogger<LeaveOutFormService> _logger;
         private const string PROCESS_CODE = "PI_Trainning_PROCESS"; // 外出外訓流程代碼
         private const string FORM_CODE = "PI_Trainning"; // 外出外訓表單代碼
+        private const string FORM_VERSION = "1.0.0";
 
         public LeaveOutFormService(
             BpmService bpmService,
             FtpService ftpService,
             IBasicInfoService basicInfoService,
+            IBpmFormSyncService formSyncService,
+            IAttachmentService attachmentService,
             ILogger<LeaveOutFormService> logger)
         {
             _bpmService = bpmService;
             _ftpService = ftpService;
             _basicInfoService = basicInfoService;
+            _formSyncService = formSyncService;
+            _attachmentService = attachmentService;
             _logger = logger;
         }
 
@@ -93,17 +100,31 @@ namespace HRSystemAPI.Services
                 if (!string.IsNullOrEmpty(request.Efileurl))
                 {
                     hdnFilePath = request.Efileurl;
-                    _logger.LogInformation("使用上傳的 hdnFilePath: {FilePath}", hdnFilePath);
+                    _logger.LogInformation("使用上傳的 efileurl: {FilePath}", hdnFilePath);
                 }
-                // 如果沒有 efileurl 但有 efileid，則根據 efileid 構建 FTP 路徑（向後相容性）
+                // 如果提供了 efileid，自動查詢/構建實際的檔案路徑
                 else if (request.Efileid != null && request.Efileid.Any())
                 {
-                    _logger.LogInformation("處理附件，共 {Count} 個附件", request.Efileid.Count);
-                    // 將附件 ID 轉換為 FTP 路徑格式
-                    // 格式: FTPTest~~/FTPShare/filename
-                    var ftpPaths = request.Efileid.Select(id => $"FTPTest~~/FTPShare/leaveout_{id}.pdf").ToList();
-                    hdnFilePath = string.Join("||", ftpPaths);
-                    _logger.LogInformation("構建的 hdnFilePath: {FilePath}", hdnFilePath);
+                    _logger.LogInformation("根據 efileid 查詢實際的檔案路徑，共 {Count} 個檔案", request.Efileid.Count);
+                    
+                    // 查詢每個檔案的實際 URL
+                    var fileUrls = await _attachmentService.GetFileUrlsByIdsAsync(request.Efileid);
+                    
+                    if (fileUrls.Any())
+                    {
+                        hdnFilePath = string.Join("||", fileUrls.Values);
+                        _logger.LogInformation("成功查詢到 {Count} 個檔案的 URL: {FilePath}", fileUrls.Count, hdnFilePath);
+                    }
+                    else
+                    {
+                        // 如果查詢失敗，檢查是否有提供檔案 ID
+                        _logger.LogWarning("無法查詢到檔案 URL，請檢查檔案 ID 是否有效");
+                        return new LeaveOutFormOperationResult
+                        {
+                            Code = "203",
+                            Msg = $"無法查詢到檔案。檔案 ID: {string.Join(", ", request.Efileid)}"
+                        };
+                    }
                 }
 
                 // 5. 建構 BPM API 請求資料
@@ -133,6 +154,48 @@ namespace HRSystemAPI.Services
                                 : null;
                             
                             _logger.LogInformation("外出外訓申請成功，表單ID: {FormId}, 流水號: {SerialNo}", formId, serialNo);
+                            
+                            // 儲存外出單到本地 MySQL DB (54.46.24.34)
+                            try
+                            {
+                                var leaveOutForm = new BpmForm
+                                {
+                                    FormId = formId ?? serialNo ?? Guid.NewGuid().ToString(),
+                                    FormCode = FORM_CODE,
+                                    FormType = "LEAVE_OUT",
+                                    FormVersion = FORM_VERSION,
+                                    ApplicantId = request.Uid ?? "",
+                                    ApplicantName = employeeInfo.EmployeeName,
+                                    ApplicantDepartment = employeeInfo.DepartmentName,
+                                    Status = "PENDING",
+                                    ApplyDate = DateTime.Now,
+                                    SubmitTime = DateTime.Now,
+                                    LastSyncTime = DateTime.Now,
+                                    IsSyncedToBpm = true
+                                };
+                                // 构建表單数据 (formData 已在上面的 BuildBpmCreateRequest 中构建)
+                                var formDataMap = new Dictionary<string, object?>
+                                {
+                                    ["uid"] = request.Uid,
+                                    ["cid"] = request.Cid,
+                                    ["etype"] = request.Etype,
+                                    ["edate"] = request.Edate,
+                                    ["estarttime"] = request.Estarttime,
+                                    ["eendtime"] = request.Eendtime,
+                                    ["ereason"] = request.Ereason,
+                                    ["elocation"] = request.Elocation,
+                                    ["ereturncompany"] = request.Ereturncompany,
+                                    ["hdnFilePath"] = hdnFilePath
+                                };
+                                leaveOutForm.SetFormData(formDataMap);
+
+                                await _formSyncService.SaveFormToLocalAsync(leaveOutForm);
+                                _logger.LogInformation("外出單已儲存到本地 MySQL DB: {FormId}", leaveOutForm.FormId);
+                            }
+                            catch (Exception dbEx)
+                            {
+                                _logger.LogWarning(dbEx, "儲存外出單到本地 MySQL DB 失敗，但 BPM 提交已成功");
+                            }
                             
                             return new LeaveOutFormOperationResult
                             {
@@ -430,6 +493,12 @@ namespace HRSystemAPI.Services
                 { "isReturn", isReturn }
             };
 
+            // 如果有附件路徑，加入 hdnFilePath 到 formData 內部
+            if (!string.IsNullOrEmpty(hdnFilePath))
+            {
+                formData["hdnFilePath"] = hdnFilePath;
+            }
+
             // 組裝 formDataMap（使用正確的表單代碼）
             var formDataMap = new Dictionary<string, object>
             {
@@ -448,13 +517,6 @@ namespace HRSystemAPI.Services
                 { "environment", "TEST" },
                 { "hasAttachments", !string.IsNullOrEmpty(hdnFilePath) }
             };
-
-            // 如果有附件路徑，加入 hdnFilePath 和 filePath
-            if (!string.IsNullOrEmpty(hdnFilePath))
-            {
-                bpmRequest.Add("hdnFilePath", hdnFilePath);
-                bpmRequest.Add("filePath", hdnFilePath);  // 同時提供 filePath
-            }
 
             return bpmRequest;
         }

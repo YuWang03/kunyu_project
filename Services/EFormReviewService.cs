@@ -40,7 +40,7 @@ namespace HRSystemAPI.Services
                 {
                     foreach (var item in workItems.EnumerateArray())
                     {
-                        var serialNo = item.GetProperty("processSerialNumber").GetString();
+                        var serialNo = item.GetProperty("processSerialNumber").GetString()?.Trim();
                         // TODO: 根據 serialNo 取得表單詳細資料，並組裝 EFormReviewItem
                         // 這裡僅示範一筆假資料
                         response.Data.EFormData.Add(new EFormReviewItem

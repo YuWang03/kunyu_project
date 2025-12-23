@@ -32,7 +32,7 @@ namespace HRSystemAPI.Controllers
         {
             try
             {
-                _logger.LogInformation($"收到電子表單選單列表請求 - TokenId: {request.tokenid}, CID: {request.cid}, UID: {request.uid}");
+                _logger.LogInformation($"收到電子表單選單列表請求 - TokenId: {request.tokenid}, CID: {request.cid}, UID: {request.uid}, Language: {request.language}");
 
                 // 驗證必填參數
                 if (string.IsNullOrWhiteSpace(request.tokenid) ||
@@ -45,6 +45,40 @@ namespace HRSystemAPI.Controllers
                         code = "400",
                         msg = "參數不完整"
                     });
+                }
+
+                // 驗證語系參數
+                if (!string.IsNullOrWhiteSpace(request.language))
+                {
+                    var language = request.language.ToUpper();
+                    if (language != "T" && language != "C" && language != "TW" && language != "CN")
+                    {
+                        _logger.LogWarning($"電子表單選單列表請求語系參數無效 - Language: {request.language}");
+                        return BadRequest(new EFormsMenuResponse
+                        {
+                            code = "400",
+                            msg = "語系參數無效，只支援 T/TW (繁體) 或 C/CN (簡體)"
+                        });
+                    }
+
+                    // 標準化語系代碼 (tw/cn 轉換為 T/C)
+                    if (language == "TW")
+                    {
+                        request.language = "T";
+                    }
+                    else if (language == "CN")
+                    {
+                        request.language = "C";
+                    }
+                    else
+                    {
+                        request.language = language;
+                    }
+                }
+                else
+                {
+                    // 預設為繁體中文
+                    request.language = "T";
                 }
 
                 // 呼叫服務取得選單列表

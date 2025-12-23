@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace HRSystemAPI.Models
 {
@@ -337,24 +338,28 @@ namespace HRSystemAPI.Models
         /// Token標記（必填）
         /// </summary>
         [Required(ErrorMessage = "tokenid 為必填")]
+        [JsonPropertyName("tokenid")]
         public string Tokenid { get; set; } = string.Empty;
 
         /// <summary>
         /// 目前所屬公司（必填）
         /// </summary>
         [Required(ErrorMessage = "cid 為必填")]
+        [JsonPropertyName("cid")]
         public string Cid { get; set; } = string.Empty;
 
         /// <summary>
         /// 使用者工號（必填）
         /// </summary>
         [Required(ErrorMessage = "uid 為必填")]
+        [JsonPropertyName("uid")]
         public string Uid { get; set; } = string.Empty;
 
         /// <summary>
         /// 查詢年份（必填，只能查詢近三年）
         /// </summary>
         [Required(ErrorMessage = "queryyear 為必填")]
+        [JsonPropertyName("queryyear")]
         public string Queryyear { get; set; } = string.Empty;
     }
 
@@ -366,16 +371,19 @@ namespace HRSystemAPI.Models
         /// <summary>
         /// 是否成功（200=成功, 203=失敗）
         /// </summary>
+        [JsonPropertyName("code")]
         public string Code { get; set; } = string.Empty;
 
         /// <summary>
         /// 失敗訊息
         /// </summary>
+        [JsonPropertyName("msg")]
         public string Msg { get; set; } = string.Empty;
 
         /// <summary>
         /// 數據返回區（成功時有此區，失敗時無此區）
         /// </summary>
+        [JsonPropertyName("data")]
         public EduViewData? Data { get; set; }
     }
 
@@ -387,16 +395,19 @@ namespace HRSystemAPI.Models
         /// <summary>
         /// 課程資料
         /// </summary>
+        [JsonPropertyName("edudata")]
         public List<EduCourseItem> Edudata { get; set; } = new List<EduCourseItem>();
 
         /// <summary>
         /// 課程年度總時數標題（預設值：學分合計）
         /// </summary>
+        [JsonPropertyName("yearhourstitle")]
         public string Yearhourstitle { get; set; } = "學分合計";
 
         /// <summary>
         /// 課程年度總時數
         /// </summary>
+        [JsonPropertyName("yearhours")]
         public string Yearhours { get; set; } = string.Empty;
     }
 
@@ -408,16 +419,19 @@ namespace HRSystemAPI.Models
         /// <summary>
         /// 課程類別
         /// </summary>
+        [JsonPropertyName("classtype")]
         public string Classtype { get; set; } = string.Empty;
 
         /// <summary>
         /// 課程名稱
         /// </summary>
+        [JsonPropertyName("classname")]
         public string Classname { get; set; } = string.Empty;
 
         /// <summary>
         /// 課程時數
         /// </summary>
+        [JsonPropertyName("classhours")]
         public string Classhours { get; set; } = string.Empty;
     }
 

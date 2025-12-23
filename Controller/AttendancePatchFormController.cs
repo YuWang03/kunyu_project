@@ -37,40 +37,64 @@ namespace HRSystemAPI.Controllers
         /// - uid: 使用者工號
         /// - edate: 上班日期 (格式: yyyy-MM-dd)
         /// - ereason: 原因代碼
-        ///   - A: 上班忘刷卡(臉)
-        ///   - B: 下班忘刷卡(臉)
-        ///   - C: 上下班忘刷卡(臉)
-        ///   - D: 其他
+        ///   - A: 上班忘刷卡(臉) - 需填 eclockIn
+        ///   - B: 下班忘刷卡(臉) - 需填 eclockOut
+        ///   - C: 上下班忘刷卡(臉) - 需填 eclockIn 和 eclockOut
+        ///   - D: 其他 - 根據情況填 eclockIn 或/和 eclockOut
         /// 
-        /// 選填欄位（二擇一）：
+        /// 選填欄位（根據 ereason 決定是否需要）：
         /// - eclockIn: 未刷卡上班時間 (格式: HH:mm)
         /// - eclockOut: 未刷卡下班時間 (格式: HH:mm)
         /// 
         /// 條件欄位：
-        /// - edetails: 其他事由 (當 ereason 為 D 時必填)
+        /// - edetails: 其他事由 (當 ereason 為 D 時建議填寫)
         /// 
-        /// 範例 1 - 上班忘刷卡:
+        /// 範例 1 - 只補下班打卡:
         /// {
         ///   "tokenid": "53422421",
         ///   "cid": "45624657",
         ///   "uid": "0325",
-        ///   "edate": "2025-09-16",
+        ///   "edate": "2025-12-22",
+        ///   "eclockIn": "",
+        ///   "eclockOut": "18:30",
+        ///   "ereason": "B",
+        ///   "edetails": ""
+        /// }
+        /// 
+        /// 範例 2 - 只補上班打卡:
+        /// {
+        ///   "tokenid": "53422421",
+        ///   "cid": "45624657",
+        ///   "uid": "0325",
+        ///   "edate": "2025-12-22",
         ///   "eclockIn": "08:55",
         ///   "eclockOut": "",
         ///   "ereason": "A",
         ///   "edetails": ""
         /// }
         /// 
-        /// 範例 2 - 下班忘刷卡 (其他原因):
+        /// 範例 3 - 補上下班打卡:
         /// {
         ///   "tokenid": "53422421",
         ///   "cid": "45624657",
         ///   "uid": "0325",
-        ///   "edate": "2025-09-16",
+        ///   "edate": "2025-12-22",
+        ///   "eclockIn": "08:55",
+        ///   "eclockOut": "18:30",
+        ///   "ereason": "C",
+        ///   "edetails": ""
+        /// }
+        /// 
+        /// 範例 4 - 其他原因:
+        /// {
+        ///   "tokenid": "53422421",
+        ///   "cid": "45624657",
+        ///   "uid": "0325",
+        ///   "edate": "2025-12-22",
         ///   "eclockIn": "",
         ///   "eclockOut": "18:30",
         ///   "ereason": "D",
-        ///   "edetails": "機器故障"
+        ///   "edetails": "機器故障導致未能刷卡"
         /// }
         /// </remarks>
         /// <param name="request">出勤確認單申請資料</param>

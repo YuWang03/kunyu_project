@@ -5,20 +5,39 @@ namespace HRSystemAPI.Services
 {
     /// <summary>
     /// 待我審核服務實作
+    /// 整合本地 DB 同步功能
     /// </summary>
     public class ReviewService : IReviewService
     {
         private readonly BpmService _bpmService;
         private readonly IBasicInfoService _basicInfoService;
+        private readonly IBpmFormSyncService _formSyncService;
+        private readonly IBpmFormRepository _formRepository;
+        private readonly IEFormApprovalRepository _approvalRepository;
         private readonly ILogger<ReviewService> _logger;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ReviewService"/> class.
+        /// </summary>
+        /// <param name="bpmService">The BPM service.</param>
+        /// <param name="basicInfoService">The basic info service.</param>
+        /// <param name="formSyncService">The BPM form sync service.</param>
+        /// <param name="formRepository">The BPM form repository.</param>
+        /// <param name="approvalRepository">The eForm approval repository.</param>
+        /// <param name="logger">The logger instance.</param>
         public ReviewService(
             BpmService bpmService,
             IBasicInfoService basicInfoService,
+            IBpmFormSyncService formSyncService,
+            IBpmFormRepository formRepository,
+            IEFormApprovalRepository approvalRepository,
             ILogger<ReviewService> logger)
         {
             _bpmService = bpmService;
             _basicInfoService = basicInfoService;
+            _formSyncService = formSyncService;
+            _formRepository = formRepository;
+            _approvalRepository = approvalRepository;
             _logger = logger;
         }
 
@@ -73,6 +92,7 @@ namespace HRSystemAPI.Services
                         Msg = "請求成功",
                         Data = new ReviewListData
                         {
+                            Uid = request.Uid,
                             EFormData = new List<ReviewListItem>()
                         }
                     };
@@ -118,13 +138,65 @@ namespace HRSystemAPI.Services
 
                 _logger.LogInformation("共處理了 {Count} 個待審核項目", reviewItems.Count);
 
+                // 4. 根據表單類型進行篩選
+                if (!string.IsNullOrEmpty(request.EFormType))
+                {
+                    var requestedTypes = request.EFormType.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(t => t.Trim().ToUpper())
+                        .ToList();
+                    
+                    _logger.LogInformation("篩選表單類型: {Types}", string.Join(", ", requestedTypes));
+                    
+                    reviewItems = reviewItems
+                        .Where(item => requestedTypes.Contains(item.EFormType.ToUpper()))
+                        .ToList();
+                    
+                    _logger.LogInformation("篩選後剩餘 {Count} 個項目", reviewItems.Count);
+                }
+
+                // 5. 計算分頁參數
+                if (!int.TryParse(request.Page, out var pageNumber) || pageNumber < 1)
+                {
+                    pageNumber = 1;
+                }
+                
+                if (!int.TryParse(request.PageSize, out var pageSize) || pageSize < 1)
+                {
+                    pageSize = 20;
+                }
+
+                var totalCount = reviewItems.Count;
+                var totalPages = (int)Math.Ceiling((double)totalCount / pageSize);
+                
+                // 確保頁碼不超過總頁數
+                if (pageNumber > totalPages && totalPages > 0)
+                {
+                    pageNumber = totalPages;
+                }
+
+                _logger.LogInformation("分頁參數: Page={Page}, PageSize={PageSize}, TotalCount={TotalCount}, TotalPages={TotalPages}", 
+                    pageNumber, pageSize, totalCount, totalPages);
+
+                // 6. 取得當前頁的資料
+                var pagedItems = reviewItems
+                    .Skip((pageNumber - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToList();
+
+                _logger.LogInformation("返回 {Count} 個項目", pagedItems.Count);
+
                 return new ReviewListResponse
                 {
                     Code = "200",
                     Msg = "請求成功",
                     Data = new ReviewListData
                     {
-                        EFormData = reviewItems
+                        Uid = request.Uid,
+                        TotalCount = totalCount.ToString(),
+                        Page = pageNumber.ToString(),
+                        PageSize = pageSize.ToString(),
+                        TotalPages = totalPages.ToString(),
+                        EFormData = pagedItems
                     }
                 };
             }
@@ -150,12 +222,16 @@ namespace HRSystemAPI.Services
 
                 // 1. 解析表單類型
                 var formType = ParseFormType(request.FormId);
+                var (processCode, formCode, formVersion) = GetProcessCodeFromFormType(formType);
                 
-                // 2. 從 BPM 取得表單詳細資料
-                var endpoint = $"bpm/forms/{request.FormId}";
+                // 2. 從 BPM 取得表單詳細資料（使用 sync-process-info）
+                var endpoint = $"bpm/sync-process-info?processSerialNo={request.FormId}&processCode={processCode}&environment=TEST&formCode={formCode}&formVersion={formVersion}";
+                _logger.LogInformation("呼叫 BPM API: {Endpoint}", endpoint);
+                
                 var responseJson = await _bpmService.GetAsync(endpoint);
+                _logger.LogDebug("BPM API 回應: {Response}", responseJson);
                 
-                // TODO: 根據不同表單類型解析資料
+                // 3. 解析回應資料
                 var detailData = await ParseFormDetail(request.FormId, formType, responseJson);
 
                 if (detailData == null)
@@ -187,6 +263,11 @@ namespace HRSystemAPI.Services
 
         /// <summary>
         /// 執行簽核作業
+        /// 流程：
+        /// 1. GET /bpm/workitems/{uid} 取得待辦事項（包含 processSerialNumber, processCode, workItemOID）
+        /// 2. 根據 processCode 判斷表單類型，匹配用戶請求的表單
+        /// 3. GET /bpm/sync-process-info 取得表單完整資訊（用於驗證）
+        /// 4. POST /bpm/workitem-approval/complete 完成簽核
         /// </summary>
         public async Task<ReviewApprovalResponse> ApproveReviewAsync(ReviewApprovalRequest request)
         {
@@ -231,24 +312,45 @@ namespace HRSystemAPI.Services
                     }
                 }
 
-                // TODO: 這裡應該要呼叫 BPM API 來執行真正的簽核
-                // 目前先回傳模擬的成功回應用於測試
-                _logger.LogInformation("簽核資料驗證成功，共 {Count} 筆待簽核項目", request.ApprovalData.Count);
+                // 步驟 1: 取得使用者的待辦事項清單
+                _logger.LogInformation("步驟 1: 取得待辦事項清單，UID: {Uid}", request.Uid);
+                var workItemsEndpoint = $"bpm/workitems/{request.Uid}";
+                var workItemsResponseJson = await _bpmService.GetAsync(workItemsEndpoint);
+                _logger.LogInformation("待辦事項清單回應: {Response}", workItemsResponseJson);
                 
-                return new ReviewApprovalResponse
+                var workItemsResponse = JsonSerializer.Deserialize<BpmWorkItemsResponse>(workItemsResponseJson, new JsonSerializerOptions
                 {
-                    Code = "200",
-                    Msg = "請求成功",
-                    Data = new ReviewApprovalResponseData
-                    {
-                        Status = "請求成功"
-                    }
-                };
+                    PropertyNameCaseInsensitive = true
+                });
 
-                /* 
-                // 未來正式版本應使用以下邏輯來實際呼叫 BPM API
+                if (workItemsResponse == null || workItemsResponse.WorkItems == null || !workItemsResponse.WorkItems.Any())
+                {
+                    _logger.LogWarning("找不到待辦事項");
+                    return new ReviewApprovalResponse
+                    {
+                        Code = "203",
+                        Msg = "請求失敗，找不到待辦事項"
+                    };
+                }
+
+                _logger.LogInformation("找到 {Count} 個待辦事項", workItemsResponse.WorkItems.Count);
+
+                // 建立表單ID到workItem的映射（使用 processSerialNumber 作為 key）
+                var workItemMap = new Dictionary<string, BpmWorkItem>(StringComparer.OrdinalIgnoreCase);
+                foreach (var workItem in workItemsResponse.WorkItems)
+                {
+                    if (!string.IsNullOrEmpty(workItem.ProcessSerialNumber))
+                    {
+                        workItemMap[workItem.ProcessSerialNumber] = workItem;
+                        _logger.LogDebug("待辦事項映射: {SerialNo} -> ProcessCode: {ProcessCode}, WorkItemOID: {OID}", 
+                            workItem.ProcessSerialNumber, workItem.ProcessCode, workItem.WorkItemOID);
+                    }
+                }
+
+                // 步驟 2: 對每筆簽核資料執行簽核
                 var successCount = 0;
                 var failCount = 0;
+                var failedFormIds = new List<string>();
 
                 foreach (var approval in request.ApprovalData)
                 {
@@ -257,30 +359,222 @@ namespace HRSystemAPI.Services
                         _logger.LogInformation("處理簽核: FormType={FormType}, FormId={FormId}", 
                             approval.EFormType, approval.EFormId);
 
-                        // 建立簽核請求
-                        var approvalData = new
+                        // 查找對應的 workItem（使用 eformid 匹配 processSerialNumber）
+                        if (!workItemMap.TryGetValue(approval.EFormId, out var workItem))
                         {
-                            userId = request.Uid,
-                            formId = approval.EFormId,
-                            action = request.ApprovalStatus == "Y" ? "approve" : "reject",
-                            comments = request.Comments,
-                            flow = request.ApprovalFlow // S: 中止流程, R: 退回發起人
+                            _logger.LogWarning("找不到表單對應的待辦事項: {FormId}", approval.EFormId);
+                            failCount++;
+                            failedFormIds.Add(approval.EFormId);
+                            continue;
+                        }
+
+                        // 驗證表單類型是否匹配（根據 processCode）
+                        var expectedFormType = GetFormTypeByProcessCode(workItem.ProcessCode);
+                        if (!string.IsNullOrEmpty(expectedFormType) && 
+                            !expectedFormType.Equals(approval.EFormType, StringComparison.OrdinalIgnoreCase))
+                        {
+                            _logger.LogWarning("表單類型不匹配: 預期 {Expected}, 實際 {Actual}, FormId: {FormId}", 
+                                expectedFormType, approval.EFormType, approval.EFormId);
+                            // 繼續處理，不視為錯誤（可能有特殊情況）
+                        }
+
+                        // 步驟 3: 取得表單完整資訊以獲取 workItemOID（若待辦事項已有則跳過）
+                        string workItemOID = workItem.WorkItemOID;
+                        
+                        if (string.IsNullOrEmpty(workItemOID))
+                        {
+                            _logger.LogInformation("待辦事項缺少 WorkItemOID，嘗試從 sync-process-info 取得");
+                            
+                            var processCode = workItem.ProcessCode;
+                            if (string.IsNullOrEmpty(processCode))
+                            {
+                                // 根據表單類型推斷 processCode
+                                processCode = GetProcessCodeByFormType(approval.EFormType);
+                            }
+                            
+                            var syncEndpoint = $"bpm/sync-process-info?processSerialNo={Uri.EscapeDataString(approval.EFormId)}&processCode={Uri.EscapeDataString(processCode)}&environment=TEST";
+                            _logger.LogInformation("呼叫 sync-process-info: {Endpoint}", syncEndpoint);
+                            
+                            try
+                            {
+                                var syncResponseJson = await _bpmService.GetAsync(syncEndpoint);
+                                _logger.LogInformation("sync-process-info 回應: {Response}", syncResponseJson);
+                                
+                                var syncResponse = JsonSerializer.Deserialize<JsonElement>(syncResponseJson);
+                                
+                                if (syncResponse.TryGetProperty("status", out var statusProp) && 
+                                    statusProp.GetString()?.Equals("SUCCESS", StringComparison.OrdinalIgnoreCase) == true)
+                                {
+                                    if (syncResponse.TryGetProperty("processInfo", out var processInfo) &&
+                                        processInfo.TryGetProperty("workItemOID", out var oidProp))
+                                    {
+                                        workItemOID = oidProp.GetString() ?? "";
+                                        _logger.LogInformation("從 sync-process-info 取得 WorkItemOID: {OID}", workItemOID);
+                                    }
+                                }
+                            }
+                            catch (Exception syncEx)
+                            {
+                                _logger.LogWarning(syncEx, "取得 sync-process-info 失敗: {FormId}", approval.EFormId);
+                            }
+                        }
+
+                        if (string.IsNullOrEmpty(workItemOID))
+                        {
+                            _logger.LogWarning("無法取得 WorkItemOID: {FormId}", approval.EFormId);
+                            failCount++;
+                            failedFormIds.Add(approval.EFormId);
+                            continue;
+                        }
+
+                        // 步驟 4: 呼叫 workitem-approval/complete 完成簽核
+                        var completeRequest = new BpmWorkItemApprovalCompleteRequest
+                        {
+                            WorkItemOID = workItemOID,
+                            UserId = request.Uid,
+                            Comment = request.Comments ?? ""
                         };
 
-                        var endpoint = $"bpm/workitems/approve";
-                        _logger.LogInformation("呼叫 BPM API: {Endpoint}, Data: {@ApprovalData}", endpoint, approvalData);
+                        // 根據簽核狀態決定要呼叫的 API
+                        string approvalEndpoint;
+                        object requestBody;
+
+                        if (request.ApprovalStatus == "Y")
+                        {
+                            // 同意：使用 workitem-approval/complete
+                            approvalEndpoint = "bpm/workitem-approval/complete";
+                            requestBody = completeRequest;
+                        }
+                        else
+                        {
+                            // 不同意：根據 approvalFlow 決定
+                            if (request.ApprovalFlow == "S")
+                            {
+                                // 中止流程
+                                approvalEndpoint = "bpm/workitem-approval/terminate";
+                            }
+                            else if (request.ApprovalFlow == "R")
+                            {
+                                // 退回發起人
+                                approvalEndpoint = "bpm/workitem-approval/return";
+                            }
+                            else
+                            {
+                                // 預設為拒絕
+                                approvalEndpoint = "bpm/workitem-approval/reject";
+                            }
+                            requestBody = completeRequest;
+                        }
+
+                        _logger.LogInformation("呼叫簽核 API: {Endpoint}, WorkItemOID: {OID}, UserId: {UserId}", 
+                            approvalEndpoint, workItemOID, request.Uid);
                         
-                        var responseJson = await _bpmService.PostAsync(endpoint, approvalData);
+                        var responseJson = await _bpmService.PostAsync(approvalEndpoint, requestBody);
+                        _logger.LogInformation("簽核 API 回應: {Response}", responseJson);
                         
-                        _logger.LogInformation("BPM API 回應: {Response}", responseJson);
-                        _logger.LogInformation("簽核成功: {FormId}", approval.EFormId);
-                        successCount++;
+                        // 檢查回應
+                        var response = JsonSerializer.Deserialize<JsonElement>(responseJson);
+                        var isSuccess = false;
+                        
+                        if (response.TryGetProperty("status", out var status))
+                        {
+                            isSuccess = status.GetString()?.Equals("SUCCESS", StringComparison.OrdinalIgnoreCase) ?? false;
+                        }
+                        else if (response.TryGetProperty("success", out var success))
+                        {
+                            isSuccess = success.GetBoolean();
+                        }
+                        else
+                        {
+                            // 如果沒有明確的狀態，假設成功（某些 API 可能不返回狀態）
+                            isSuccess = true;
+                        }
+
+                        if (isSuccess)
+                        {
+                            _logger.LogInformation("簽核成功: {FormId}", approval.EFormId);
+                            successCount++;
+                            
+                            // 同步簽核結果到本地 DB
+                            try
+                            {
+                                var newStatus = request.ApprovalStatus == "Y" ? "APPROVED" : 
+                                    request.ApprovalFlow == "S" ? "CANCELLED" : 
+                                    request.ApprovalFlow == "R" ? "RETURNED" : "REJECTED";
+                                
+                                await _formSyncService.UpdateFormStatusAsync(
+                                    approval.EFormId, 
+                                    newStatus, 
+                                    request.Comments);
+                                    
+                                // 記錄簽核歷程
+                                var approvalHistory = new BpmFormApprovalHistory
+                                {
+                                    FormId = approval.EFormId,
+                                    SequenceNo = 1, // 需要從現有歷程取得最大序號+1
+                                    ApproverId = request.Uid,
+                                    Action = request.ApprovalStatus == "Y" ? "APPROVE" : 
+                                        request.ApprovalFlow == "S" ? "TERMINATE" : 
+                                        request.ApprovalFlow == "R" ? "RETURN" : "REJECT",
+                                    Comment = request.Comments,
+                                    ActionTime = DateTime.Now
+                                };
+                                await _formRepository.AddApprovalHistoryAsync(approvalHistory);
+                                
+                                _logger.LogInformation("簽核結果已同步到本地 DB: {FormId}, 狀態: {Status}", 
+                                    approval.EFormId, newStatus);
+                            }
+                            catch (Exception dbEx)
+                            {
+                                _logger.LogWarning(dbEx, "同步簽核結果到本地 DB 失敗: {FormId}", approval.EFormId);
+                            }
+                            
+                            // ★★★ 保存签核记录到签核记录表 ★★★
+                            try
+                            {
+                                // 获取签核者信息
+                                var employeeInfo = await _basicInfoService.GetEmployeeByIdAsync(request.Uid);
+                                var uName = employeeInfo?.EmployeeName ?? "";
+                                var uDepartment = employeeInfo?.DepartmentName ?? "";
+                                
+                                var approvalRecord = new EFormApprovalRecord
+                                {
+                                    TokenId = request.TokenId ?? "",
+                                    Cid = request.Cid ?? "",
+                                    Uid = request.Uid,
+                                    UName = uName,
+                                    UDepartment = uDepartment,
+                                    EFormType = approval.EFormType,
+                                    EFormId = approval.EFormId,
+                                    ApprovalStatus = request.ApprovalStatus,
+                                    ApprovalFlow = request.ApprovalFlow ?? "A",
+                                    Comments = request.Comments,
+                                    ApprovalDate = DateTime.Now
+                                };
+                                
+                                await _approvalRepository.SaveApprovalRecordAsync(approvalRecord);
+                                _logger.LogInformation("签核记录已保存到数据库: FormId={FormId}, Uid={Uid}", 
+                                    approval.EFormId, request.Uid);
+                            }
+                            catch (Exception saveEx)
+                            {
+                                _logger.LogWarning(saveEx, "保存签核记录失败: {FormId}", approval.EFormId);
+                                // 不影响签核流程，继续执行
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogWarning("簽核失敗: {FormId}, 回應: {Response}", approval.EFormId, responseJson);
+                            failCount++;
+                            failedFormIds.Add(approval.EFormId);
+                        }
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "簽核失敗: FormType={FormType}, FormId={FormId}, 錯誤訊息: {Message}", 
                             approval.EFormType, approval.EFormId, ex.Message);
                         failCount++;
+                        failedFormIds.Add(approval.EFormId);
                     }
                 }
 
@@ -295,20 +589,22 @@ namespace HRSystemAPI.Services
                         Msg = "請求成功",
                         Data = new ReviewApprovalResponseData
                         {
-                            Status = $"簽核成功 {successCount} 筆" + (failCount > 0 ? $"，失敗 {failCount} 筆" : "")
+                            Status = successCount == request.ApprovalData.Count 
+                                ? "請求成功" 
+                                : $"部分成功：成功 {successCount} 筆，失敗 {failCount} 筆"
                         }
                     };
                 }
                 else
                 {
-                    _logger.LogError("所有簽核都失敗，總共 {TotalCount} 筆", request.ApprovalData.Count);
+                    _logger.LogError("所有簽核都失敗，總共 {TotalCount} 筆，失敗表單: {FailedIds}", 
+                        request.ApprovalData.Count, string.Join(", ", failedFormIds));
                     return new ReviewApprovalResponse
                     {
                         Code = "203",
                         Msg = "請求失敗，所有簽核都失敗"
                     };
                 }
-                */
             }
             catch (Exception ex)
             {
@@ -319,6 +615,39 @@ namespace HRSystemAPI.Services
                     Msg = "請求失敗，主要條件不符合"
                 };
             }
+        }
+
+        /// <summary>
+        /// 根據 processCode 判斷表單類型
+        /// processCode 標準內容：
+        /// - 銷假單：PI_CANCEL_LEAVE_001_PROCESS
+        /// - 出缺勤異常：Attendance_Exception_001_PROCESS
+        /// - 請假單：PI_LEAVE_001_PROCESS
+        /// - 加班單：PI_OVERTIME_001_PROCESS
+        /// - 外出訓練單：PI_Trainning_PROCESS
+        /// </summary>
+        private string GetFormTypeByProcessCode(string processCode)
+        {
+            if (string.IsNullOrEmpty(processCode))
+                return "";
+                
+            // 轉換為大寫進行比對
+            var code = processCode.ToUpperInvariant();
+            
+            if (code.Contains("CANCEL_LEAVE") || code.Contains("CANCELLEAVE"))
+                return "D"; // 銷假單
+            if (code.Contains("ATTENDANCE") || code.Contains("EXCEPTION"))
+                return "R"; // 出缺勤異常/出勤確認單
+            if (code.Contains("LEAVE"))
+                return "L"; // 請假單
+            if (code.Contains("OVERTIME"))
+                return "A"; // 加班單
+            if (code.Contains("TRAINNING") || code.Contains("TRAINING") || code.Contains("OUTING"))
+                return "O"; // 外出訓練單/外出外訓單
+            if (code.Contains("TRIP") || code.Contains("BUSINESS"))
+                return "T"; // 出差單
+                
+            return "";
         }
 
         #region 私有輔助方法
@@ -478,21 +807,22 @@ namespace HRSystemAPI.Services
 
                 return new ReviewListItem
                 {
-                    UName = requesterName,
-                    UDepartment = department,
+                    Uid = requesterId?.Trim() ?? "",
+                    UName = requesterName?.Trim() ?? "",
+                    UDepartment = department?.Trim() ?? "",
                     FormIdTitle = "表單編號",
-                    FormId = serialNumber,
+                    FormId = serialNumber?.Trim() ?? "",
                     EFormTypeTitle = "申請類別",
-                    EFormType = formType,
-                    EFormName = GetFormTypeName(formType),
+                    EFormType = formType?.Trim() ?? "",
+                    EFormName = GetFormTypeName(formType ?? "L")?.Trim() ?? "",
                     EStartTitle = formType == "R" ? "上班時間" : "起始時間",
-                    EStartDate = startDate,
-                    EStartTime = startTime,
+                    EStartDate = startDate?.Trim() ?? "",
+                    EStartTime = startTime?.Trim() ?? "",
                     EEndTitle = formType == "R" ? "" : "結束時間",
-                    EEndDate = formType == "R" ? "" : endDate,
-                    EEndTime = formType == "R" ? "" : endTime,
+                    EEndDate = formType == "R" ? "" : (endDate?.Trim() ?? ""),
+                    EEndTime = formType == "R" ? "" : (endTime?.Trim() ?? ""),
                     EReasonTitle = "事由",
-                    EReason = reason
+                    EReason = reason?.Trim() ?? ""
                 };
             }
             catch (Exception ex)
@@ -500,6 +830,23 @@ namespace HRSystemAPI.Services
                 _logger.LogError(ex, "取得表單詳細資料失敗: {SerialNumber}, 錯誤: {Message}", serialNumber, ex.Message);
                 return null;
             }
+        }
+
+        /// <summary>
+        /// 根據表單類型取得對應的 ProcessCode, FormCode 和 FormVersion
+        /// </summary>
+        private (string processCode, string formCode, string formVersion) GetProcessCodeFromFormType(string formType)
+        {
+            return formType switch
+            {
+                "L" => ("PI_LEAVE_001_PROCESS", "PI_LEAVE_001", "1.0.0"), // 請假單
+                "A" => ("PI_OVERTIME_001_PROCESS", "PI_OVERTIME_001", "1.0.0"), // 加班單
+                "R" => ("PI_ATTENDANCE_001_PROCESS", "Attendance_Exception_001", "1.0.0"), // 出勤確認單
+                "T" => ("PI_BUSINESSTRIP_001_PROCESS", "PI_BUSINESSTRIP_001", "1.0.0"), // 出差單
+                "O" => ("PI_OUTING_001_PROCESS", "PI_OUTING_001", "1.0.0"), // 外出外訓單
+                "D" => ("PI_CANCELLEAVE_001_PROCESS", "PI_CANCELLEAVE_001", "1.0.0"), // 銷假單
+                _ => ("PI_LEAVE_001_PROCESS", "PI_LEAVE_001", "1.0.0") // 預設為請假單
+            };
         }
 
         /// <summary>
@@ -528,83 +875,310 @@ namespace HRSystemAPI.Services
             {
                 if (element.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.String)
                 {
-                    return prop.GetString();
+                    return prop.GetString()?.Trim();
                 }
             }
             return null;
         }
 
         /// <summary>
-        /// 解析表單詳細資料
+        /// 解析表單詳細資料（從 BPM sync-process-info 回應）
         /// </summary>
         private async Task<ReviewDetailData?> ParseFormDetail(string formId, string formType, string responseJson)
         {
             try
             {
-                var formData = JsonSerializer.Deserialize<JsonElement>(responseJson);
+                var syncResponse = JsonSerializer.Deserialize<JsonElement>(responseJson, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+
+                // 檢查 BPM 回應狀態
+                if (!syncResponse.TryGetProperty("status", out var statusElement) || 
+                    statusElement.GetString() != "SUCCESS")
+                {
+                    var errorMsg = syncResponse.TryGetProperty("message", out var msgElement) 
+                        ? msgElement.GetString() 
+                        : "BPM API 回應失敗";
+                    _logger.LogError("BPM API 回應失敗: {Message}", errorMsg);
+                    return null;
+                }
+
+                // 取得表單資料和流程資料
+                JsonElement formInfo = default;
+                JsonElement processInfo = default;
+                
+                if (syncResponse.TryGetProperty("formInfo", out var formInfoElement))
+                {
+                    formInfo = formInfoElement;
+                }
+                
+                if (syncResponse.TryGetProperty("processInfo", out var processInfoElement))
+                {
+                    processInfo = processInfoElement;
+                }
 
                 // 取得申請人資訊
-                var applicantId = formData.GetProperty("applicantId").GetString() ?? "";
-                var employeeInfo = await _basicInfoService.GetEmployeeByIdAsync(applicantId);
+                var applicantId = "";
+                if (processInfo.ValueKind != JsonValueKind.Undefined && 
+                    processInfo.TryGetProperty("requesterIdEmployeeId", out var requesterIdElement))
+                {
+                    applicantId = requesterIdElement.GetString() ?? "";
+                }
 
-                // 解析附件
+                // 取得實際的表單資料 (第一個 property 就是表單資料)
+                JsonElement formData = default;
+                if (formInfo.ValueKind != JsonValueKind.Undefined)
+                {
+                    foreach (var prop in formInfo.EnumerateObject())
+                    {
+                        formData = prop.Value;
+                        break; // 只取第一個（應該只有一個表單資料）
+                    }
+                }
+                
+                var employeeInfo = await _basicInfoService.GetEmployeeByIdAsync(applicantId);
+                var userName = employeeInfo?.EmployeeName ?? TryGetStringValue(formData, "applierName", "requesterName") ?? "未知";
+                var userDepartment = employeeInfo?.DepartmentName ?? TryGetStringValue(formData, "applierDeptName", "departmentName", "orgName") ?? "未知";
+
+                // 建立回應資料
+                var detailData = new ReviewDetailData
+                {
+                    Uid = applicantId?.Trim() ?? "",
+                    UName = userName?.Trim() ?? "",
+                    UDepartment = userDepartment?.Trim() ?? "",
+                    FormIdTitle = "表單編號",
+                    FormId = formId?.Trim() ?? "",
+                    EFormTypeTitle = "申請類別",
+                    EFormType = formType?.Trim() ?? "",
+                    EFormName = GetFormTypeName(formType ?? "L")?.Trim() ?? ""
+                };
+
+                // 設定時間標題
+                if (formType == "R") // 出勤確認單
+                {
+                    detailData.EStartTitle = "上班時間";
+                    detailData.EEndTitle = "";
+                }
+                else
+                {
+                    detailData.EStartTitle = "起始時間";
+                    detailData.EEndTitle = "結束時間";
+                }
+
+                // 取得表單欄位資料
+                // 起始日期和時間
+                detailData.EStartDate = FormatDate(TryGetStringValue(formData, 
+                    "startDate", "applyDate", "leaveStartDate", "overtimeDate", 
+                    "exceptionDate", "tripStartDate", "businessTripStartDate", "eventDate") ?? "");
+                
+                detailData.EStartTime = TryGetStringValue(formData, 
+                    "startTime", "leaveStartTime", "overtimeStartTime", 
+                    "exceptionTime", "tripStartTime") ?? "";
+
+                // 結束日期和時間（出勤確認單不需要）
+                if (formType != "R")
+                {
+                    detailData.EEndDate = FormatDate(TryGetStringValue(formData, 
+                        "endDate", "leaveEndDate", "overtimeEndDate", 
+                        "exceptionEndTime", "tripEndDate", "businessTripEndDate") ?? "");
+                    
+                    detailData.EEndTime = TryGetStringValue(formData, 
+                        "endTime", "leaveEndTime", "overtimeEndTime", "tripEndTime") ?? "";
+                }
+
+                // 事由
+                detailData.EReasonTitle = "事由";
+                detailData.EReason = TryGetStringValue(formData, 
+                    "reason", "leaveReason", "overtimeReason", "exceptionDescription", 
+                    "tripPurpose", "businessTripPurpose", "description") ?? "";
+
+                // 代理人
+                detailData.EAgentTitle = "代理人";
+                detailData.EAgent = TryGetStringValue(formData, 
+                    "substituteId", "agentNo", "agentId", "agent", "delegateId", "delegate") ?? "";
+
+                // 處理附件
                 var attachments = new List<ReviewAttachment>();
-                if (formData.TryGetProperty("attachments", out var attachmentsElement))
+                if (formData.TryGetProperty("attachments", out var attachmentsElement) && 
+                    attachmentsElement.ValueKind == JsonValueKind.Array)
                 {
                     var index = 1;
                     foreach (var attachment in attachmentsElement.EnumerateArray())
                     {
+                        var fileName = TryGetStringValue(attachment, 
+                            "fileName", "name", "displayName") ?? $"附件{index}";
+                        var originalFileName = TryGetStringValue(attachment, 
+                            "originalFileName", "originalName", "fileName") ?? $"file{index}.pdf";
+                        var fileUrl = TryGetStringValue(attachment, 
+                            "fileUrl", "url", "path", "downloadUrl") ?? "";
+
                         attachments.Add(new ReviewAttachment
                         {
-                            EFileId = index.ToString(),
-                            EFileName = attachment.GetProperty("fileName").GetString() ?? "",
-                            ESFileName = attachment.GetProperty("originalFileName").GetString() ?? "",
-                            EFileUrl = attachment.GetProperty("fileUrl").GetString() ?? ""
+                            EFileId = index.ToString().Trim(),
+                            EFileName = fileName?.Trim() ?? "",
+                            ESFileName = originalFileName?.Trim() ?? "",
+                            EFileUrl = fileUrl?.Trim() ?? ""
                         });
                         index++;
                     }
                 }
-
-                // 解析表單流程
-                var formFlow = new List<ReviewFormFlow>();
-                if (formData.TryGetProperty("approvalHistory", out var historyElement))
+                // 也檢查 filePath 欄位（可能是用 || 分隔的多個檔案路徑）
+                else if (formData.TryGetProperty("filePath", out var filePathElement))
                 {
-                    foreach (var history in historyElement.EnumerateArray())
+                    var filePath = filePathElement.GetString()?.Trim();
+                    if (!string.IsNullOrWhiteSpace(filePath))
                     {
-                        formFlow.Add(new ReviewFormFlow
+                        var files = filePath.Split(new[] { "||" }, StringSplitOptions.RemoveEmptyEntries);
+                        for (int i = 0; i < files.Length; i++)
                         {
-                            WorkItem = history.GetProperty("workItem").GetString() ?? "",
-                            WorkStatus = history.GetProperty("status").GetString() ?? ""
-                        });
+                            var file = files[i].Trim();
+                            var fileName = System.IO.Path.GetFileName(file);
+                            attachments.Add(new ReviewAttachment
+                            {
+                                EFileId = (i + 1).ToString(),
+                                EFileName = fileName,
+                                ESFileName = fileName,
+                                EFileUrl = file
+                            });
+                        }
                     }
                 }
 
-                return new ReviewDetailData
+                detailData.Attachments = attachments;
+                detailData.EFileType = attachments.Any() ? "C" : "";
+
+                // 處理表單流程（從 processInfo.actInstanceInfos 取得）
+                var formFlows = new List<ReviewFormFlow>();
+                
+                if (processInfo.ValueKind != JsonValueKind.Undefined &&
+                    processInfo.TryGetProperty("actInstanceInfos", out var actInstanceInfos) && 
+                    actInstanceInfos.ValueKind == JsonValueKind.Array)
                 {
-                    Uid = applicantId,
-                    UName = employeeInfo?.EmployeeName ?? "未知",
-                    UDepartment = employeeInfo?.DepartmentName ?? "未知",
-                    FormId = formId,
-                    EFormType = formType,
-                    EFormName = GetFormTypeName(formType),
-                    EStartTitle = formType == "R" ? "上班時間" : "起始時間",
-                    EStartDate = formData.GetProperty("startDate").GetString() ?? "",
-                    EStartTime = formData.GetProperty("startTime").GetString() ?? "",
-                    EEndTitle = formType == "R" ? "" : "結束時間",
-                    EEndDate = formType == "R" ? "" : (formData.GetProperty("endDate").GetString() ?? ""),
-                    EEndTime = formType == "R" ? "" : (formData.GetProperty("endTime").GetString() ?? ""),
-                    EReason = formData.GetProperty("reason").GetString() ?? "",
-                    EAgent = formData.TryGetProperty("agentId", out var agentElement) ? agentElement.GetString() ?? "" : "",
-                    EFileType = attachments.Any() ? "C" : "",
-                    Attachments = attachments,
-                    EFormFlow = formFlow
-                };
+                    foreach (var activity in actInstanceInfos.EnumerateArray())
+                    {
+                        var activityName = TryGetStringValue(activity, "activityName") ?? "";
+                        var state = TryGetStringValue(activity, "state") ?? "";
+                        var performerName = TryGetStringValue(activity, "performerName") ?? "";
+                        var comment = TryGetStringValue(activity, "comment") ?? "";
+                        
+                        // 組合工作項目描述
+                        var workItem = activityName;
+                        if (!string.IsNullOrEmpty(performerName) && !performerName.Contains("AutoAgent"))
+                        {
+                            workItem = $"{activityName} - {performerName}";
+                        }
+                        if (!string.IsNullOrEmpty(comment))
+                        {
+                            workItem += $" ({comment})";
+                        }
+                        
+                        // 轉換狀態為中文
+                        var workStatus = ConvertBpmStateToChinese(state);
+
+                        formFlows.Add(new ReviewFormFlow
+                        {
+                            WorkItem = workItem?.Trim() ?? "",
+                            WorkStatus = workStatus?.Trim() ?? ""
+                        });
+                    }
+                }
+                
+                // 如果沒有流程資料，至少加入表單已送出的記錄
+                if (!formFlows.Any())
+                {
+                    formFlows.Add(new ReviewFormFlow
+                    {
+                        WorkItem = "表單已送出",
+                        WorkStatus = "已完成"
+                    });
+                }
+
+                detailData.EFormFlow = formFlows;
+
+                _logger.LogInformation("成功解析表單詳細資料，FormId: {FormId}, 附件數: {AttachmentCount}, 流程數: {FlowCount}",
+                    formId, attachments.Count, formFlows.Count);
+
+                return detailData;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "解析表單詳細資料失敗: {FormId}", formId);
                 return null;
             }
+        }
+
+        /// <summary>
+        /// 嘗試從 JsonElement 中取得字串值（支援多個可能的屬性名稱）
+        /// </summary>
+        private string? TryGetStringValue(JsonElement element, params string[] propertyNames)
+        {
+            if (element.ValueKind == JsonValueKind.Undefined || element.ValueKind == JsonValueKind.Null)
+            {
+                return null;
+            }
+
+            foreach (var propertyName in propertyNames)
+            {
+                if (element.TryGetProperty(propertyName, out var prop))
+                {
+                    if (prop.ValueKind == JsonValueKind.String)
+                    {
+                        var value = prop.GetString()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(value))
+                        {
+                            return value;
+                        }
+                    }
+                    else if (prop.ValueKind != JsonValueKind.Null)
+                    {
+                        var stringValue = prop.ToString().Trim();
+                        if (!string.IsNullOrWhiteSpace(stringValue))
+                        {
+                            return stringValue;
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// 格式化日期
+        /// </summary>
+        private string FormatDate(string? date)
+        {
+            if (string.IsNullOrWhiteSpace(date))
+                return "";
+
+            var cleanDate = date.Replace("/", "-")
+                                .Replace(".", "-")
+                                .Replace(" ", "");
+
+            return cleanDate;
+        }
+
+        /// <summary>
+        /// 將 BPM 狀態轉換為中文
+        /// </summary>
+        private string ConvertBpmStateToChinese(string state)
+        {
+            if (string.IsNullOrWhiteSpace(state))
+                return "未完成";
+
+            // BPM 狀態格式: open.running, closed.completed, open.running.not_performed 等
+            if (state.Contains("closed.completed"))
+                return "已完成";
+            else if (state.Contains("closed.aborted") || state.Contains("closed.terminated"))
+                return "已中止";
+            else if (state.Contains("open.running"))
+                return "進行中";
+            else if (state.Contains("not_performed"))
+                return "未完成";
+            else if (state.Contains("open"))
+                return "未完成";
+            else
+                return state;
         }
 
         #endregion

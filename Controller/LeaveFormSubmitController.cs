@@ -104,7 +104,9 @@ namespace HRSystemAPI.Controllers
                     return Ok(new LeaveFormSubmitResponse
                     {
                         Code = "200",
-                        Msg = "請求成功"
+                        Msg = "請求成功",
+                        FormId = result.FormId,
+                        FormNumber = result.FormNumber
                     });
                 }
                 else

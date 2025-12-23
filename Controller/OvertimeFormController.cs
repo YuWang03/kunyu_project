@@ -145,7 +145,7 @@ namespace HRSystemAPI.Controllers
         }
 
         /// <summary>
-        /// API: 加班確認提交（POST /app/fotconfirm）
+        /// API: 加班確認提交（POST /app/efotconfirmsubmit）
         /// 提交實際發生的加班申請表單，填具實際的加班時間及所需附件後送出
         /// </summary>
         /// <param name="request">加班確認提交資料</param>
@@ -183,7 +183,7 @@ namespace HRSystemAPI.Controllers
         /// }
         /// ```
         /// </remarks>
-        [HttpPost("~/app/fotconfirm")]
+        [HttpPost("~/app/efotconfirmsubmit")]
         [Consumes("application/json")]
         [ProducesResponseType(typeof(FotConfirmSubmitResponse), StatusCodes.Status200OK)]
         public async Task<IActionResult> FotConfirm([FromBody] FotConfirmSubmitRequest request)

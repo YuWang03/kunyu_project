@@ -38,7 +38,7 @@ namespace HRSystemAPI.Services
         Task<EFotConfirmListResponse> FotConfirmListAsync(EFotConfirmListRequest request);
 
         /// <summary>
-        /// API: 加班確認提交（POST /app/fotconfirm）
+        /// API: 加班確認提交（POST /app/efotconfirmlist）
         /// 提交實際發生的加班申請表單，填具實際的加班時間及所需附件後送出
         /// </summary>
         Task<FotConfirmSubmitResponse> FotConfirmSubmitAsync(FotConfirmSubmitRequest request);

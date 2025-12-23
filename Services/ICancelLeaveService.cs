@@ -8,6 +8,12 @@ namespace HRSystemAPI.Services
     public interface ICancelLeaveService
     {
         /// <summary>
+        /// 查詢單筆請假資料（透過 BPM API）
+        /// 根據 formid 返回單一請假表單資料
+        /// </summary>
+        Task<CancelLeaveSingleResponse> GetCancelLeaveSingleAsync(CancelLeaveSingleRequest request);
+
+        /// <summary>
         /// 查詢可銷假的請假單列表（透過 BPM API）
         /// 返回起始日未到的個人請假表單
         /// </summary>

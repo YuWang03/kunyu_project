@@ -64,11 +64,51 @@ namespace HRSystemAPI.Services
                 var formData = new Dictionary<string, object?>
                 {
                     { "applyDate", formattedDate },
-                    { "exceptionTime", request.EclockIn ?? "" },
-                    { "exceptionEndTime", request.EclockOut ?? "" },
                     { "exceptionReason", reasonText },
                     { "exceptionDescription", exceptionDescription }
                 };
+
+                // 根據原因代碼選擇性地添加時間欄位
+                // A: 上班忘刷卡(臉) - 只填 exceptionTime
+                // B: 下班忘刷卡(臉) - 只填 exceptionEndTime
+                // C: 上下班忘刷卡(臉) - 填兩個時間
+                // D: 其他 - 根據 eclockIn/eclockOut 判斷
+                switch (request.Ereason.ToUpper())
+                {
+                    case "A": // 上班忘刷卡
+                        if (!string.IsNullOrWhiteSpace(request.EclockIn))
+                        {
+                            formData["exceptionTime"] = request.EclockIn;
+                        }
+                        break;
+                    case "B": // 下班忘刷卡
+                        if (!string.IsNullOrWhiteSpace(request.EclockOut))
+                        {
+                            formData["exceptionEndTime"] = request.EclockOut;
+                        }
+                        break;
+                    case "C": // 上下班忘刷卡
+                        if (!string.IsNullOrWhiteSpace(request.EclockIn))
+                        {
+                            formData["exceptionTime"] = request.EclockIn;
+                        }
+                        if (!string.IsNullOrWhiteSpace(request.EclockOut))
+                        {
+                            formData["exceptionEndTime"] = request.EclockOut;
+                        }
+                        break;
+                    case "D": // 其他
+                    default:
+                        if (!string.IsNullOrWhiteSpace(request.EclockIn))
+                        {
+                            formData["exceptionTime"] = request.EclockIn;
+                        }
+                        if (!string.IsNullOrWhiteSpace(request.EclockOut))
+                        {
+                            formData["exceptionEndTime"] = request.EclockOut;
+                        }
+                        break;
+                }
 
                 var bpmRequest = new
                 {

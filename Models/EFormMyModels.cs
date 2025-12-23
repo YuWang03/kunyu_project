@@ -21,6 +21,15 @@ namespace HRSystemAPI.Models
         [Required]
         [JsonPropertyName("uid")]
         public string Uid { get; set; } = string.Empty;
+
+        [JsonPropertyName("page")]
+        public string Page { get; set; } = "1";
+
+        [JsonPropertyName("pagesize")]
+        public string PageSize { get; set; } = "20";
+
+        [JsonPropertyName("eformtype")]
+        public string EFormType { get; set; } = string.Empty;
     }
 
     /// <summary>
@@ -40,12 +49,27 @@ namespace HRSystemAPI.Models
 
     public class EFormMyData
     {
+        [JsonPropertyName("totalCount")]
+        public string TotalCount { get; set; } = "0";
+
+        [JsonPropertyName("page")]
+        public string Page { get; set; } = "1";
+
+        [JsonPropertyName("pageSize")]
+        public string PageSize { get; set; } = "20";
+
+        [JsonPropertyName("totalPages")]
+        public string TotalPages { get; set; } = "0";
+
         [JsonPropertyName("eformdata")]
         public List<EFormMyItem> EFormData { get; set; } = new();
     }
 
     public class EFormMyItem
     {
+        [JsonPropertyName("uid")]
+        public string Uid { get; set; } = string.Empty;
+
         [JsonPropertyName("uname")]
         public string UName { get; set; } = string.Empty;
 
@@ -61,14 +85,14 @@ namespace HRSystemAPI.Models
         [JsonPropertyName("eformtypetitle")]
         public string EFormTypeTitle { get; set; } = "申請類別";
 
-        [JsonPropertyName("eformtype ")]
-        public string EFormType { get; set; } = string.Empty;
+		[JsonPropertyName("eformtype")]
+		public string EFormType { get; set; } = string.Empty;
 
-        [JsonPropertyName("eformname ")]
-        public string EFormName { get; set; } = string.Empty;
+		[JsonPropertyName("eformname")]
+		public string EFormName { get; set; } = string.Empty;
 
-        [JsonPropertyName("estarttitle ")]
-        public string EStartTitle { get; set; } = string.Empty;
+		[JsonPropertyName("estarttitle")]
+		public string EStartTitle { get; set; } = string.Empty;
 
         [JsonPropertyName("estartdate")]
         public string EStartDate { get; set; } = string.Empty;
@@ -76,7 +100,7 @@ namespace HRSystemAPI.Models
         [JsonPropertyName("estarttime")]
         public string EStartTime { get; set; } = string.Empty;
 
-        [JsonPropertyName("eendtitle ")]
+        [JsonPropertyName("eendtitle")]
         public string EEndTitle { get; set; } = string.Empty;
 
         [JsonPropertyName("eenddate")]

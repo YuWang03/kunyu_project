@@ -30,8 +30,8 @@ namespace HRSystemAPI.Controllers
         /// </summary>
         /// <remarks>
         /// 查詢可銷假的請假單列表
-        /// - 返回起始日未到的個人請假表單
-        /// - 用於顯示可以申請銷假的請假單列表
+        /// - 返回使用者自己提交的請假表單
+        /// - 用於顯示可以申請銷假的請假單列表（已提交但因故需要取消）
         /// 
         /// **範例請求：**
         /// ```json
@@ -68,7 +68,7 @@ namespace HRSystemAPI.Controllers
         /// </remarks>
         /// <param name="request">銷假申請列表請求</param>
         /// <returns>可銷假的請假單列表</returns>
-        [HttpPost("efleaveget")]
+        [HttpPost("efleavelist")] // 修改路徑
         [ProducesResponseType(typeof(CancelLeaveListResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
@@ -120,7 +120,99 @@ namespace HRSystemAPI.Controllers
         }
 
         /// <summary>
-        /// 2. 銷假申請詳細資料 API
+        /// 2. 單筆請假資料查詢 API
+        /// </summary>
+        /// <remarks>
+        /// 根據 formid 查詢單筆請假資料
+        /// - 返回指定表單編號的請假資訊
+        /// - 用於查詢特定請假單的基本資料
+        /// 
+        /// **範例請求：**
+        /// ```json
+        /// {
+        ///     "tokenid": "53422421",
+        ///     "cid": "45624657",
+        ///     "uid": "0325",
+        ///     "formid": "PI_Leave_IDL_BG_PI_HRM00000018"
+        /// }
+        /// ```
+        /// 
+        /// **範例回應（成功）：**
+        /// ```json
+        /// {
+        ///     "code": "200",
+        ///     "msg": "請求成功",
+        ///     "data": {
+        ///         "efleveldata": {
+        ///             "uid": "3552",
+        ///             "uname": "王大明",
+        ///             "udepartment": "電子一部",
+        ///             "formid": "PI_Leave_IDL_BG_PI_HRM00000018",
+        ///             "leavetype": "病假",
+        ///             "estartdate": "2025-09-18",
+        ///             "estarttime": "08:00",
+        ///             "eenddate": "2025-09-20",
+        ///             "eendtime": "22:00",
+        ///             "ereason": "生病調養"
+        ///         }
+        ///     }
+        /// }
+        /// ```
+        /// </remarks>
+        /// <param name="request">單筆請假資料查詢請求</param>
+        /// <returns>單筆請假資料</returns>
+        [HttpPost("efleaveget")]
+        [ProducesResponseType(typeof(CancelLeaveSingleResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<ActionResult<CancelLeaveSingleResponse>> GetCancelLeaveSingle(
+            [FromBody] CancelLeaveSingleRequest request)
+        {
+            try
+            {
+                _logger.LogInformation("單筆請假資料查詢 API 被呼叫，表單編號: {FormId}", request.Formid);
+
+                if (!ModelState.IsValid)
+                {
+                    var errors = string.Join(", ", ModelState.Values
+                        .SelectMany(v => v.Errors)
+                        .Select(e => e.ErrorMessage));
+                    
+                    _logger.LogWarning("請求驗證失敗: {Errors}", errors);
+                    
+                    return Ok(new CancelLeaveSingleResponse
+                    {
+                        Code = "203",
+                        Msg = $"請求失敗，{errors}"
+                    });
+                }
+
+                var response = await _cancelLeaveService.GetCancelLeaveSingleAsync(request);
+                
+                if (response.Code == "200")
+                {
+                    _logger.LogInformation("單筆請假資料查詢成功，表單編號: {FormId}", request.Formid);
+                }
+                else
+                {
+                    _logger.LogWarning("單筆請假資料查詢失敗: {Msg}", response.Msg);
+                }
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "單筆請假資料查詢 API 發生錯誤");
+                return Ok(new CancelLeaveSingleResponse
+                {
+                    Code = "203",
+                    Msg = "請求失敗，主要條件不符合"
+                });
+            }
+        }
+
+        /// <summary>
+        /// 3. 銷假申請詳細資料 API
         /// </summary>
         /// <remarks>
         /// 查詢單一請假單的詳細資料
@@ -225,7 +317,7 @@ namespace HRSystemAPI.Controllers
         }
 
         /// <summary>
-        /// 3. 銷假申請預覽 API
+        /// 4. 銷假申請預覽 API
         /// </summary>
         /// <remarks>
         /// 查詢請假單預覽（用於銷假申請時顯示原請假單詳細資訊）
@@ -322,7 +414,7 @@ namespace HRSystemAPI.Controllers
         }
 
         /// <summary>
-        /// 4. 銷假申請送出 API
+        /// 5. 銷假申請送出 API
         /// </summary>
         /// <remarks>
         /// 提交銷假申請
